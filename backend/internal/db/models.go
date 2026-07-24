@@ -43,6 +43,23 @@ type User struct {
 	CreatedAt    time.Time
 }
 
+// DataTransferHandler is an operator-registered canned response for an
+// inbound DataTransfer.req matching VendorID (and, if set, MessageID — an
+// empty MessageID matches any messageId for that vendorId). It exists
+// because DataTransfer's payload shape is entirely vendor-defined, so there
+// is no schema-driven way to know in advance what a CSMS will send or what
+// a real device would answer with — the operator has to tell the simulator.
+type DataTransferHandler struct {
+	ID             uint64 `gorm:"primaryKey;autoIncrement"`
+	StationID      string `gorm:"type:varchar(64);index"`
+	VendorID       string `gorm:"type:varchar(255)"`
+	MessageID      string `gorm:"type:varchar(255)"`
+	ResponseStatus string `gorm:"type:varchar(32)"` // Accepted | Rejected | UnknownMessageId | UnknownVendorId
+	ResponseData   string `gorm:"type:text"`
+	CreatedBy      string `gorm:"type:varchar(255)"`
+	CreatedAt      time.Time
+}
+
 // StationEvent is both the audit trail ("who created/connected/disconnected
 // this station") and the OCPP message log ("what frame went out/came in") —
 // every observable thing that happens to a Station is one of these rows, so

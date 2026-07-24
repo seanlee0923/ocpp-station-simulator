@@ -33,7 +33,7 @@ func Open(driver, dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	if err := database.AutoMigrate(&Station{}, &StationEvent{}, &User{}); err != nil {
+	if err := database.AutoMigrate(&Station{}, &StationEvent{}, &User{}, &DataTransferHandler{}); err != nil {
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}
 	return database, nil

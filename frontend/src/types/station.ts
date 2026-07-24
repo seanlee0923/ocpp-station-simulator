@@ -89,6 +89,18 @@ export interface StationEventRow {
   createdAt: string
 }
 
+export interface DataTransferHandlerRow {
+  id: number
+  vendorId: string
+  messageId?: string
+  status: string
+  data?: string
+  createdBy: string
+  createdAt: string
+}
+
+export const DATA_TRANSFER_STATUS_VALUES = ['Accepted', 'Rejected', 'UnknownMessageId', 'UnknownVendorId']
+
 export interface WsEvent {
   stationId: string
   type: string

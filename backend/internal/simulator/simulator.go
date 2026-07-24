@@ -119,6 +119,14 @@ type Simulator interface {
 	SendFirmwareStatusNotification(ctx context.Context, status string) error
 	SendDiagnosticsStatusNotification(ctx context.Context, status string) error
 
+	// RegisterDataTransferResponse/UnregisterDataTransferResponse manage the
+	// canned responses the generic inbound DataTransfer handler consults
+	// (see dataTransferMatcher). SendDataTransfer is the outbound direction
+	// — the simulator initiating a DataTransfer to the CSMS.
+	RegisterDataTransferResponse(vendorID, messageID, status, data string)
+	UnregisterDataTransferResponse(vendorID, messageID string)
+	SendDataTransfer(ctx context.Context, vendorID, messageID, data string) (DataTransferResult, error)
+
 	Events() <-chan Event
 }
 

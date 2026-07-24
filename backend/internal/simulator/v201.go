@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"context"
+	"encoding/json"
 	"sync/atomic"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 type v201Simulator struct {
 	eventBus
+	dataTransferMatcher
 	station *station.Station
 	// lastFirmwareRequestID/lastLogRequestID cache the requestId a CSMS sent
 	// with its most recent UpdateFirmware/GetLog, so the operator-triggered
@@ -26,7 +28,7 @@ type v201Simulator struct {
 }
 
 func newV201Simulator(cfg StationConfig) (Simulator, error) {
-	sim := &v201Simulator{eventBus: newEventBus()}
+	sim := &v201Simulator{eventBus: newEventBus(), dataTransferMatcher: newDataTransferMatcher()}
 	sim.lastFirmwareRequestID.Store(-1)
 	sim.lastLogRequestID.Store(-1)
 	st, err := station.New(station.Config{
@@ -57,6 +59,9 @@ func newV201Simulator(cfg StationConfig) (Simulator, error) {
 		return nil, err
 	}
 	if err := station.Handle(st, sim.handleGetLog); err != nil {
+		return nil, err
+	}
+	if err := station.Handle(st, sim.handleDataTransfer); err != nil {
 		return nil, err
 	}
 	return sim, nil
@@ -97,6 +102,33 @@ func (sim *v201Simulator) handleGetLog(_ context.Context, req v201.GetLogRequest
 	sim.emitRemoteCommand("GetLog", req)
 	fileName := "diagnostics.log"
 	return v201.GetLogConfirmation{Status: v201.GetLogConfirmationLogStatusEnumAccepted, Filename: &fileName}, nil
+}
+
+// handleDataTransfer mirrors v16Simulator.handleDataTransfer — see its doc
+// comment for why one generic handler covers every vendorId/messageId.
+func (sim *v201Simulator) handleDataTransfer(_ context.Context, req v201.DataTransferRequest) (v201.DataTransferConfirmation, error) {
+	sim.emitRemoteCommand("DataTransfer", req)
+	messageID := ""
+	if req.MessageID != nil {
+		messageID = *req.MessageID
+	}
+	response, ok := sim.lookup(req.VendorID, messageID)
+	if !ok {
+		return v201.DataTransferConfirmation{Status: v201.DataTransferConfirmationDataTransferStatusEnumUnknownVendorID}, nil
+	}
+	confirmation := v201.DataTransferConfirmation{Status: v201.DataTransferConfirmationDataTransferStatusEnum(response.status)}
+	if response.data != "" {
+		confirmation.Data = json.RawMessage(response.data)
+	}
+	return confirmation, nil
+}
+
+func (sim *v201Simulator) RegisterDataTransferResponse(vendorID, messageID, status, data string) {
+	sim.register(vendorID, messageID, status, data)
+}
+
+func (sim *v201Simulator) UnregisterDataTransferResponse(vendorID, messageID string) {
+	sim.unregister(vendorID, messageID)
 }
 
 func (sim *v201Simulator) SendBootNotification(ctx context.Context, fields BootFields) (BootResult, error) {
@@ -227,6 +259,27 @@ func (sim *v201Simulator) SendDiagnosticsStatusNotification(ctx context.Context,
 	}
 	_, err := callAndEmit[v201.LogStatusNotificationRequest, v201.LogStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "LogStatusNotification", request)
 	return err
+}
+
+func (sim *v201Simulator) SendDataTransfer(ctx context.Context, vendorID, messageID, data string) (DataTransferResult, error) {
+	request := v201.DataTransferRequest{VendorID: vendorID}
+	if messageID != "" {
+		request.MessageID = &messageID
+	}
+	if data != "" {
+		request.Data = json.RawMessage(data)
+	}
+	confirmation, err := callAndEmit[v201.DataTransferRequest, v201.DataTransferConfirmation](ctx, &sim.eventBus, sim.station, "DataTransfer", request)
+	if err != nil {
+		return DataTransferResult{}, err
+	}
+	result := DataTransferResult{Status: string(confirmation.Status)}
+	if confirmation.Data != nil {
+		if raw, err := json.Marshal(confirmation.Data); err == nil {
+			result.Data = string(raw)
+		}
+	}
+	return result, nil
 }
 
 func stopReason201(reason string) *v201.TransactionEventRequestReasonEnum {

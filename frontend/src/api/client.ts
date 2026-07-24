@@ -1,8 +1,26 @@
 import { apiFetch, ApiError } from './http'
 import type {
-  BootFields, BootResult, AuthorizeResult, CreateStationInput, MeterValuesInput,
+  BootFields, BootResult, AuthorizeResult, CreateStationInput, DataTransferHandlerRow, MeterValuesInput,
   Station, StartTxInput, StartTxResult, StationEventRow, StatusInput, StopTxInput,
 } from '../types/station'
+
+export interface SendDataTransferInput {
+  vendorId: string
+  messageId?: string
+  data?: string
+}
+
+export interface DataTransferResult {
+  status: string
+  data?: string
+}
+
+export interface DataTransferHandlerInput {
+  vendorId: string
+  messageId?: string
+  status: string
+  data?: string
+}
 
 const request = <T>(path: string, init?: RequestInit) => apiFetch<T>(`/api/stations${path}`, init)
 const post = <T>(path: string, body?: unknown) =>
@@ -25,6 +43,12 @@ export const api = {
   firmwareStatusNotification: (id: string, status: string) => post<void>(`/${id}/firmware-status-notification`, { status }),
   diagnosticsStatusNotification: (id: string, status: string) => post<void>(`/${id}/diagnostics-status-notification`, { status }),
   events: (id: string) => request<StationEventRow[]>(`/${id}/events`),
+  sendDataTransfer: (id: string, body: SendDataTransferInput) => post<DataTransferResult>(`/${id}/data-transfer`, body),
+  listDataTransferHandlers: (id: string) => request<DataTransferHandlerRow[]>(`/${id}/data-transfer-handlers`),
+  createDataTransferHandler: (id: string, body: DataTransferHandlerInput) =>
+    post<DataTransferHandlerRow>(`/${id}/data-transfer-handlers`, body),
+  deleteDataTransferHandler: (id: string, handlerId: number) =>
+    request<void>(`/${id}/data-transfer-handlers/${handlerId}`, { method: 'DELETE' }),
 }
 
 export { ApiError }

@@ -12,11 +12,12 @@ import (
 
 type v16Simulator struct {
 	eventBus
+	dataTransferMatcher
 	station *station.Station
 }
 
 func newV16Simulator(cfg StationConfig) (Simulator, error) {
-	sim := &v16Simulator{eventBus: newEventBus()}
+	sim := &v16Simulator{eventBus: newEventBus(), dataTransferMatcher: newDataTransferMatcher()}
 	st, err := station.New(station.Config{
 		URL:             cfg.CSMSURL,
 		Identity:        cfg.Identity,
@@ -45,6 +46,9 @@ func newV16Simulator(cfg StationConfig) (Simulator, error) {
 		return nil, err
 	}
 	if err := station.Handle(st, sim.handleGetDiagnostics); err != nil {
+		return nil, err
+	}
+	if err := station.Handle(st, sim.handleDataTransfer); err != nil {
 		return nil, err
 	}
 	return sim, nil
@@ -94,6 +98,36 @@ func (sim *v16Simulator) handleGetDiagnostics(_ context.Context, req v16.GetDiag
 	sim.emitRemoteCommand("GetDiagnostics", req)
 	fileName := "diagnostics.zip"
 	return v16.GetDiagnosticsConfirmation{FileName: &fileName}, nil
+}
+
+// handleDataTransfer is the one inbound handler covering every
+// vendorId/messageId combination: DataTransfer's payload is entirely
+// vendor-defined, so station.Handle (one handler per action) can't register
+// per-vendorId handlers the way the schema-driven actions do. It consults
+// dataTransferMatcher instead — see RegisterDataTransferResponse.
+func (sim *v16Simulator) handleDataTransfer(_ context.Context, req v16.DataTransferRequest) (v16.DataTransferConfirmation, error) {
+	sim.emitRemoteCommand("DataTransfer", req)
+	messageID := ""
+	if req.MessageID != nil {
+		messageID = *req.MessageID
+	}
+	response, ok := sim.lookup(req.VendorID, messageID)
+	if !ok {
+		return v16.DataTransferConfirmation{Status: v16.DataTransferConfirmationStatusUnknownVendorID}, nil
+	}
+	confirmation := v16.DataTransferConfirmation{Status: v16.DataTransferConfirmationStatus(response.status)}
+	if response.data != "" {
+		confirmation.Data = &response.data
+	}
+	return confirmation, nil
+}
+
+func (sim *v16Simulator) RegisterDataTransferResponse(vendorID, messageID, status, data string) {
+	sim.register(vendorID, messageID, status, data)
+}
+
+func (sim *v16Simulator) UnregisterDataTransferResponse(vendorID, messageID string) {
+	sim.unregister(vendorID, messageID)
 }
 
 func (sim *v16Simulator) SendBootNotification(ctx context.Context, fields BootFields) (BootResult, error) {
@@ -216,6 +250,25 @@ func (sim *v16Simulator) SendDiagnosticsStatusNotification(ctx context.Context, 
 	request := v16.DiagnosticsStatusNotificationRequest{Status: v16.DiagnosticsStatusNotificationRequestStatus(status)}
 	_, err := callAndEmit[v16.DiagnosticsStatusNotificationRequest, v16.DiagnosticsStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "DiagnosticsStatusNotification", request)
 	return err
+}
+
+func (sim *v16Simulator) SendDataTransfer(ctx context.Context, vendorID, messageID, data string) (DataTransferResult, error) {
+	request := v16.DataTransferRequest{VendorID: vendorID}
+	if messageID != "" {
+		request.MessageID = &messageID
+	}
+	if data != "" {
+		request.Data = &data
+	}
+	confirmation, err := callAndEmit[v16.DataTransferRequest, v16.DataTransferConfirmation](ctx, &sim.eventBus, sim.station, "DataTransfer", request)
+	if err != nil {
+		return DataTransferResult{}, err
+	}
+	result := DataTransferResult{Status: string(confirmation.Status)}
+	if confirmation.Data != nil {
+		result.Data = *confirmation.Data
+	}
+	return result, nil
 }
 
 func stopReason16(reason string) *v16.StopTransactionRequestReason {

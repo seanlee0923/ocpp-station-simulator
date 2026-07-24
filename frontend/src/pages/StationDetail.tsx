@@ -4,6 +4,7 @@ import { useStationSocket } from '../api/useStationSocket'
 import type { Station, StationEventRow, WsEvent } from '../types/station'
 import { ConnectorPanel } from '../components/ConnectorPanel'
 import { MaintenancePanel } from '../components/MaintenancePanel'
+import { DataTransferPanel } from '../components/DataTransferPanel'
 import { EventLog } from '../components/EventLog'
 
 interface Props {
@@ -105,6 +106,7 @@ export function StationDetail({ stationId, onBack }: Props) {
               <ConnectorPanel key={number} stationId={stationId} connectorNumber={number} version={station.version} />
             ))}
             <MaintenancePanel stationId={stationId} version={station.version} />
+            <DataTransferPanel stationId={stationId} />
           </div>
         </>
       )}
