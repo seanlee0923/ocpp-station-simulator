@@ -3,6 +3,7 @@ import { api } from '../api/client'
 import {
   DIAGNOSTICS_STATUS_VALUES_16, DIAGNOSTICS_STATUS_VALUES_2X, FIRMWARE_STATUS_VALUES, type OcppVersion,
 } from '../types/station'
+import { useToast } from '../state/ToastContext'
 
 interface Props {
   stationId: string
@@ -14,19 +15,23 @@ interface Props {
 // panel is how the operator reports progress afterward, same "operator
 // picks a status, nothing auto-progresses" pattern as MeterValues.
 export function MaintenancePanel({ stationId, version }: Props) {
+  const { showToast } = useToast()
   const diagnosticsValues = version === '1.6' ? DIAGNOSTICS_STATUS_VALUES_16 : DIAGNOSTICS_STATUS_VALUES_2X
   const [firmwareStatus, setFirmwareStatus] = useState(FIRMWARE_STATUS_VALUES[0])
   const [diagnosticsStatus, setDiagnosticsStatus] = useState(diagnosticsValues[0])
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
-  const run = async (label: string, action: () => Promise<void>) => {
+  const run = async (label: string, detail: string, action: () => Promise<void>) => {
     setBusy(label)
     setError('')
     try {
       await action()
+      showToast(`${label} 전송 — ${detail}`, 'success')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+      showToast(`${label} 전송 실패 — ${message}`, 'error')
     } finally {
       setBusy('')
     }
@@ -43,7 +48,7 @@ export function MaintenancePanel({ stationId, version }: Props) {
         </select>
         <button
           disabled={!!busy}
-          onClick={() => run('firmware', () => api.firmwareStatusNotification(stationId, firmwareStatus))}
+          onClick={() => run('FirmwareStatusNotification', firmwareStatus, () => api.firmwareStatusNotification(stationId, firmwareStatus))}
         >
           FirmwareStatusNotification 전송
         </button>
@@ -56,7 +61,11 @@ export function MaintenancePanel({ stationId, version }: Props) {
         </select>
         <button
           disabled={!!busy}
-          onClick={() => run('diagnostics', () => api.diagnosticsStatusNotification(stationId, diagnosticsStatus))}
+          onClick={() => run(
+            version === '1.6' ? 'DiagnosticsStatusNotification' : 'LogStatusNotification',
+            diagnosticsStatus,
+            () => api.diagnosticsStatusNotification(stationId, diagnosticsStatus),
+          )}
         >
           {version === '1.6' ? 'DiagnosticsStatusNotification' : 'LogStatusNotification'} 전송
         </button>

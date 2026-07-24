@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { AuthProvider, useAuth } from './state/AuthContext'
+import { ToastProvider } from './state/ToastContext'
+import { ToastContainer } from './components/ToastContainer'
 import { LoginPage } from './components/LoginPage'
 import { Dashboard } from './pages/Dashboard'
 import { StationDetail } from './pages/StationDetail'
@@ -41,7 +43,10 @@ function Shell() {
 function App() {
   return (
     <AuthProvider>
-      <Shell />
+      <ToastProvider>
+        <Shell />
+        <ToastContainer />
+      </ToastProvider>
     </AuthProvider>
   )
 }

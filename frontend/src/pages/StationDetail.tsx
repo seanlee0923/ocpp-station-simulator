@@ -7,6 +7,7 @@ import { MaintenancePanel } from '../components/MaintenancePanel'
 import { DataTransferPanel } from '../components/DataTransferPanel'
 import { ConfigPanel } from '../components/ConfigPanel'
 import { EventLog } from '../components/EventLog'
+import { useToast } from '../state/ToastContext'
 
 interface Props {
   stationId: string
@@ -21,6 +22,7 @@ function historyToWsEvent(row: StationEventRow): WsEvent {
 }
 
 export function StationDetail({ stationId, onBack }: Props) {
+  const { showToast } = useToast()
   const [station, setStation] = useState<Station | null>(null)
   const [history, setHistory] = useState<StationEventRow[]>([])
   const [vendorName, setVendorName] = useState('Acme')
@@ -48,9 +50,12 @@ export function StationDetail({ stationId, onBack }: Props) {
     setError('')
     try {
       await action()
+      showToast(`${label} 완료`, 'success')
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+      showToast(`${label} 실패 — ${message}`, 'error')
     } finally {
       setBusy('')
     }
@@ -83,17 +88,17 @@ export function StationDetail({ stationId, onBack }: Props) {
       ) : (
         <>
           <div className="row">
-            <button disabled={!!busy} onClick={() => run('connect', () => api.connect(stationId))}>
+            <button disabled={!!busy} onClick={() => run('연결', () => api.connect(stationId))}>
               연결
             </button>
-            <button disabled={!!busy} onClick={() => run('disconnect', () => api.disconnect(stationId))}>
+            <button disabled={!!busy} onClick={() => run('연결 해제', () => api.disconnect(stationId))}>
               연결 해제
             </button>
             <input value={vendorName} onChange={(event) => setVendorName(event.target.value)} placeholder="Vendor" />
             <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Model" />
             <button
               disabled={!!busy}
-              onClick={() => run('boot', async () => {
+              onClick={() => run('BootNotification 전송', async () => {
                 await api.bootNotification(stationId, { vendorName, model })
               })}
             >

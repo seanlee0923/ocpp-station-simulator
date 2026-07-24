@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api/client'
 import { MEASURAND_PRESETS, STATUS_VALUES_16, STATUS_VALUES_2X, type OcppVersion } from '../types/station'
+import { useToast } from '../state/ToastContext'
 
 interface Props {
   stationId: string
@@ -13,6 +14,7 @@ interface Props {
 // both OCPP 1.6's connectorId and 2.0.1/2.1's evseId — a 1:1 mapping that's
 // a reasonable simplification for a simulator (see plan).
 export function ConnectorPanel({ stationId, connectorNumber, version }: Props) {
+  const { showToast } = useToast()
   const [idTag, setIdTag] = useState('DEMO-TAG-01')
   const [transactionId, setTransactionId] = useState<string | null>(null)
   const [status, setStatus] = useState((version === '1.6' ? STATUS_VALUES_16 : STATUS_VALUES_2X)[0])
@@ -23,46 +25,55 @@ export function ConnectorPanel({ stationId, connectorNumber, version }: Props) {
 
   const statusValues = version === '1.6' ? STATUS_VALUES_16 : STATUS_VALUES_2X
 
-  const run = async (label: string, action: () => Promise<void>) => {
+  // Every action toasts on completion — the panel's only prior feedback was
+  // the button briefly disabling, which is easy to miss entirely.
+  const run = async (label: string, action: () => Promise<string | void>) => {
     setBusy(label)
     setError('')
     try {
-      await action()
+      const detail = await action()
+      showToast(`커넥터 ${connectorNumber}: ${label}${detail ? ` — ${detail}` : ' 완료'}`, 'success')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+      showToast(`커넥터 ${connectorNumber}: ${label} 실패 — ${message}`, 'error')
     } finally {
       setBusy('')
     }
   }
 
-  const authorize = () => run('authorize', async () => {
-    await api.authorize(stationId, idTag)
+  const authorize = () => run('Authorize', async () => {
+    const result = await api.authorize(stationId, idTag)
+    return `상태: ${result.status}`
   })
 
-  const start = () => run('start', async () => {
+  const start = () => run('Start Transaction', async () => {
     const result = await api.startTransaction(stationId, {
       connectorId: connectorNumber, evseId: connectorNumber, idTag, meterStart: 0,
     })
     setTransactionId(result.transactionId)
+    return `트랜잭션 ${result.transactionId}`
   })
 
-  const sendMeterValues = () => run('meter', async () => {
+  const sendMeterValues = () => run('MeterValues 전송', async () => {
     await api.meterValues(stationId, {
       transactionId: transactionId ?? undefined,
       connectorId: connectorNumber,
       evseId: connectorNumber,
       samples: [{ measurand, value: meterValue }],
     })
+    return `${measurand}=${meterValue}`
   })
 
-  const stop = () => run('stop', async () => {
+  const stop = () => run('Stop Transaction', async () => {
     if (!transactionId) return
     await api.stopTransaction(stationId, transactionId, { meterStop: Number(meterValue) || 0, reason: 'Local' })
     setTransactionId(null)
   })
 
-  const sendStatus = () => run('status', async () => {
+  const sendStatus = () => run('StatusNotification 전송', async () => {
     await api.statusNotification(stationId, { connectorId: connectorNumber, evseId: connectorNumber, status })
+    return status
   })
 
   return (

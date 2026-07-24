@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { DATA_TRANSFER_STATUS_VALUES, type DataTransferHandlerRow } from '../types/station'
+import { useToast } from '../state/ToastContext'
 
 interface Props {
   stationId: string
@@ -75,6 +76,7 @@ function JsonField({ value, onChange, placeholder }: JsonFieldProps) {
 // DataTransfer directly. See internal/simulator/datatransfer.go on the
 // backend for the matching rules (exact match, then vendorId-only wildcard).
 export function DataTransferPanel({ stationId }: Props) {
+  const { showToast } = useToast()
   const [handlers, setHandlers] = useState<DataTransferHandlerRow[]>([])
   const [vendorID, setVendorID] = useState('')
   const [messageID, setMessageID] = useState('')
@@ -99,12 +101,15 @@ export function DataTransferPanel({ stationId }: Props) {
     setError('')
     try {
       await api.createDataTransferHandler(stationId, { vendorId: vendorID, messageId: messageID || undefined, status, data })
+      showToast(`응답 규칙 등록됨 — ${vendorID}${messageID ? ` / ${messageID}` : ''} → ${status}`, 'success')
       setVendorID('')
       setMessageID('')
       setData('')
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+      showToast(`규칙 등록 실패 — ${message}`, 'error')
     } finally {
       setBusy('')
     }
@@ -113,9 +118,12 @@ export function DataTransferPanel({ stationId }: Props) {
   const remove = async (handler: DataTransferHandlerRow) => {
     try {
       await api.deleteDataTransferHandler(stationId, handler.id)
+      showToast(`규칙 삭제됨 — ${handler.vendorId}`, 'success')
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+      showToast(`규칙 삭제 실패 — ${message}`, 'error')
     }
   }
 
@@ -127,9 +135,13 @@ export function DataTransferPanel({ stationId }: Props) {
       const result = await api.sendDataTransfer(stationId, {
         vendorId: sendVendorID, messageId: sendMessageID || undefined, data: sendData || undefined,
       })
-      setSendResult(`${result.status}${result.data ? ` — ${result.data}` : ''}`)
+      const resultText = `${result.status}${result.data ? ` — ${result.data}` : ''}`
+      setSendResult(resultText)
+      showToast(`DataTransfer 전송 — ${resultText}`, 'success')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+      showToast(`DataTransfer 전송 실패 — ${message}`, 'error')
     } finally {
       setBusy('')
     }
