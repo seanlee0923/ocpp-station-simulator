@@ -3,6 +3,7 @@ import { api } from '../api/client'
 import { useStationSocket } from '../api/useStationSocket'
 import type { Station, StationEventRow, WsEvent } from '../types/station'
 import { ConnectorPanel } from '../components/ConnectorPanel'
+import { MaintenancePanel } from '../components/MaintenancePanel'
 import { EventLog } from '../components/EventLog'
 
 interface Props {
@@ -103,6 +104,7 @@ export function StationDetail({ stationId, onBack }: Props) {
             {Array.from({ length: station.connectorCount }, (_, index) => index + 1).map((number) => (
               <ConnectorPanel key={number} stationId={stationId} connectorNumber={number} version={station.version} />
             ))}
+            <MaintenancePanel stationId={stationId} version={station.version} />
           </div>
         </>
       )}

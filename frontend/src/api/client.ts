@@ -22,6 +22,8 @@ export const api = {
     post<void>(`/${id}/transactions/${encodeURIComponent(txId)}/stop`, body),
   meterValues: (id: string, body: MeterValuesInput) => post<void>(`/${id}/meter-values`, body),
   statusNotification: (id: string, body: StatusInput) => post<void>(`/${id}/status-notification`, body),
+  firmwareStatusNotification: (id: string, status: string) => post<void>(`/${id}/firmware-status-notification`, { status }),
+  diagnosticsStatusNotification: (id: string, status: string) => post<void>(`/${id}/diagnostics-status-notification`, { status }),
   events: (id: string) => request<StationEventRow[]>(`/${id}/events`),
 }
 

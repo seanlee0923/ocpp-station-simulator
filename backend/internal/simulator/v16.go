@@ -41,6 +41,12 @@ func newV16Simulator(cfg StationConfig) (Simulator, error) {
 	if err := station.Handle(st, sim.handleReset); err != nil {
 		return nil, err
 	}
+	if err := station.Handle(st, sim.handleUpdateFirmware); err != nil {
+		return nil, err
+	}
+	if err := station.Handle(st, sim.handleGetDiagnostics); err != nil {
+		return nil, err
+	}
 	return sim, nil
 }
 
@@ -73,6 +79,21 @@ func (sim *v16Simulator) handleRemoteStop(_ context.Context, req v16.RemoteStopT
 func (sim *v16Simulator) handleReset(_ context.Context, req v16.ResetRequest) (v16.ResetConfirmation, error) {
 	sim.emitRemoteCommand("Reset", req)
 	return v16.ResetConfirmation{Status: v16.ResetConfirmationStatusAccepted}, nil
+}
+
+// handleUpdateFirmware and handleGetDiagnostics accept unconditionally (1.6
+// gives neither confirmation a status field — accepting *is* the only
+// response) and just log the request. The operator reports progress
+// afterward via SendFirmwareStatusNotification/SendDiagnosticsStatusNotification.
+func (sim *v16Simulator) handleUpdateFirmware(_ context.Context, req v16.UpdateFirmwareRequest) (v16.UpdateFirmwareConfirmation, error) {
+	sim.emitRemoteCommand("UpdateFirmware", req)
+	return v16.UpdateFirmwareConfirmation{}, nil
+}
+
+func (sim *v16Simulator) handleGetDiagnostics(_ context.Context, req v16.GetDiagnosticsRequest) (v16.GetDiagnosticsConfirmation, error) {
+	sim.emitRemoteCommand("GetDiagnostics", req)
+	fileName := "diagnostics.zip"
+	return v16.GetDiagnosticsConfirmation{FileName: &fileName}, nil
 }
 
 func (sim *v16Simulator) SendBootNotification(ctx context.Context, fields BootFields) (BootResult, error) {
@@ -182,6 +203,18 @@ func (sim *v16Simulator) SendStatusNotification(ctx context.Context, req StatusR
 		Info:        info,
 	}
 	_, err := callAndEmit[v16.StatusNotificationRequest, v16.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "StatusNotification", request)
+	return err
+}
+
+func (sim *v16Simulator) SendFirmwareStatusNotification(ctx context.Context, status string) error {
+	request := v16.FirmwareStatusNotificationRequest{Status: v16.FirmwareStatusNotificationRequestStatus(status)}
+	_, err := callAndEmit[v16.FirmwareStatusNotificationRequest, v16.FirmwareStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "FirmwareStatusNotification", request)
+	return err
+}
+
+func (sim *v16Simulator) SendDiagnosticsStatusNotification(ctx context.Context, status string) error {
+	request := v16.DiagnosticsStatusNotificationRequest{Status: v16.DiagnosticsStatusNotificationRequestStatus(status)}
+	_, err := callAndEmit[v16.DiagnosticsStatusNotificationRequest, v16.DiagnosticsStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "DiagnosticsStatusNotification", request)
 	return err
 }
 

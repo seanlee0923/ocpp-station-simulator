@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,10 +14,15 @@ import (
 type v21Simulator struct {
 	eventBus
 	station *station.Station
+	// See v201Simulator's identical fields for why these exist.
+	lastFirmwareRequestID atomic.Int64
+	lastLogRequestID      atomic.Int64
 }
 
 func newV21Simulator(cfg StationConfig) (Simulator, error) {
 	sim := &v21Simulator{eventBus: newEventBus()}
+	sim.lastFirmwareRequestID.Store(-1)
+	sim.lastLogRequestID.Store(-1)
 	st, err := station.New(station.Config{
 		URL:             cfg.CSMSURL,
 		Identity:        cfg.Identity,
@@ -39,6 +45,12 @@ func newV21Simulator(cfg StationConfig) (Simulator, error) {
 		return nil, err
 	}
 	if err := station.Handle(st, sim.handleReset); err != nil {
+		return nil, err
+	}
+	if err := station.Handle(st, sim.handleUpdateFirmware); err != nil {
+		return nil, err
+	}
+	if err := station.Handle(st, sim.handleGetLog); err != nil {
 		return nil, err
 	}
 	return sim, nil
@@ -66,6 +78,19 @@ func (sim *v21Simulator) handleRequestStop(_ context.Context, req v21.RequestSto
 func (sim *v21Simulator) handleReset(_ context.Context, req v21.ResetRequest) (v21.ResetConfirmation, error) {
 	sim.emitRemoteCommand("Reset", req)
 	return v21.ResetConfirmation{Status: v21.ResetConfirmationResetStatusEnumAccepted}, nil
+}
+
+func (sim *v21Simulator) handleUpdateFirmware(_ context.Context, req v21.UpdateFirmwareRequest) (v21.UpdateFirmwareConfirmation, error) {
+	sim.lastFirmwareRequestID.Store(int64(req.RequestID))
+	sim.emitRemoteCommand("UpdateFirmware", req)
+	return v21.UpdateFirmwareConfirmation{Status: v21.UpdateFirmwareConfirmationUpdateFirmwareStatusEnumAccepted}, nil
+}
+
+func (sim *v21Simulator) handleGetLog(_ context.Context, req v21.GetLogRequest) (v21.GetLogConfirmation, error) {
+	sim.lastLogRequestID.Store(int64(req.RequestID))
+	sim.emitRemoteCommand("GetLog", req)
+	fileName := "diagnostics.log"
+	return v21.GetLogConfirmation{Status: v21.GetLogConfirmationLogStatusEnumAccepted, Filename: &fileName}, nil
 }
 
 func (sim *v21Simulator) SendBootNotification(ctx context.Context, fields BootFields) (BootResult, error) {
@@ -172,6 +197,29 @@ func (sim *v21Simulator) SendStatusNotification(ctx context.Context, req StatusR
 		ConnectorID:     req.ConnectorID,
 	}
 	_, err := callAndEmit[v21.StatusNotificationRequest, v21.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "StatusNotification", request)
+	return err
+}
+
+func (sim *v21Simulator) SendFirmwareStatusNotification(ctx context.Context, status string) error {
+	request := v21.FirmwareStatusNotificationRequest{Status: v21.FirmwareStatusNotificationRequestFirmwareStatusEnum(status)}
+	if id := sim.lastFirmwareRequestID.Load(); id >= 0 {
+		requestID := int(id)
+		request.RequestID = &requestID
+	}
+	_, err := callAndEmit[v21.FirmwareStatusNotificationRequest, v21.FirmwareStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "FirmwareStatusNotification", request)
+	return err
+}
+
+// SendDiagnosticsStatusNotification maps to 2.1's LogStatusNotification —
+// see the Simulator interface doc comment for why this is named after 1.6's
+// concept instead of "SendLogStatusNotification".
+func (sim *v21Simulator) SendDiagnosticsStatusNotification(ctx context.Context, status string) error {
+	request := v21.LogStatusNotificationRequest{Status: v21.LogStatusNotificationRequestUploadLogStatusEnum(status)}
+	if id := sim.lastLogRequestID.Load(); id >= 0 {
+		requestID := int(id)
+		request.RequestID = &requestID
+	}
+	_, err := callAndEmit[v21.LogStatusNotificationRequest, v21.LogStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "LogStatusNotification", request)
 	return err
 }
 

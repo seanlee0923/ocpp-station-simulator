@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,10 +14,21 @@ import (
 type v201Simulator struct {
 	eventBus
 	station *station.Station
+	// lastFirmwareRequestID/lastLogRequestID cache the requestId a CSMS sent
+	// with its most recent UpdateFirmware/GetLog, so the operator-triggered
+	// FirmwareStatusNotification/LogStatusNotification (see
+	// SendFirmwareStatusNotification/SendDiagnosticsStatusNotification
+	// below) can echo it back — the spec requires that correlation, but
+	// nothing about it needs to survive a reconnect, so a plain in-memory
+	// field (not persisted) is enough. -1 means "none seen yet".
+	lastFirmwareRequestID atomic.Int64
+	lastLogRequestID      atomic.Int64
 }
 
 func newV201Simulator(cfg StationConfig) (Simulator, error) {
 	sim := &v201Simulator{eventBus: newEventBus()}
+	sim.lastFirmwareRequestID.Store(-1)
+	sim.lastLogRequestID.Store(-1)
 	st, err := station.New(station.Config{
 		URL:             cfg.CSMSURL,
 		Identity:        cfg.Identity,
@@ -39,6 +51,12 @@ func newV201Simulator(cfg StationConfig) (Simulator, error) {
 		return nil, err
 	}
 	if err := station.Handle(st, sim.handleReset); err != nil {
+		return nil, err
+	}
+	if err := station.Handle(st, sim.handleUpdateFirmware); err != nil {
+		return nil, err
+	}
+	if err := station.Handle(st, sim.handleGetLog); err != nil {
 		return nil, err
 	}
 	return sim, nil
@@ -66,6 +84,19 @@ func (sim *v201Simulator) handleRequestStop(_ context.Context, req v201.RequestS
 func (sim *v201Simulator) handleReset(_ context.Context, req v201.ResetRequest) (v201.ResetConfirmation, error) {
 	sim.emitRemoteCommand("Reset", req)
 	return v201.ResetConfirmation{Status: v201.ResetConfirmationResetStatusEnumAccepted}, nil
+}
+
+func (sim *v201Simulator) handleUpdateFirmware(_ context.Context, req v201.UpdateFirmwareRequest) (v201.UpdateFirmwareConfirmation, error) {
+	sim.lastFirmwareRequestID.Store(int64(req.RequestID))
+	sim.emitRemoteCommand("UpdateFirmware", req)
+	return v201.UpdateFirmwareConfirmation{Status: v201.UpdateFirmwareConfirmationUpdateFirmwareStatusEnumAccepted}, nil
+}
+
+func (sim *v201Simulator) handleGetLog(_ context.Context, req v201.GetLogRequest) (v201.GetLogConfirmation, error) {
+	sim.lastLogRequestID.Store(int64(req.RequestID))
+	sim.emitRemoteCommand("GetLog", req)
+	fileName := "diagnostics.log"
+	return v201.GetLogConfirmation{Status: v201.GetLogConfirmationLogStatusEnumAccepted, Filename: &fileName}, nil
 }
 
 func (sim *v201Simulator) SendBootNotification(ctx context.Context, fields BootFields) (BootResult, error) {
@@ -172,6 +203,29 @@ func (sim *v201Simulator) SendStatusNotification(ctx context.Context, req Status
 		ConnectorID:     req.ConnectorID,
 	}
 	_, err := callAndEmit[v201.StatusNotificationRequest, v201.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "StatusNotification", request)
+	return err
+}
+
+func (sim *v201Simulator) SendFirmwareStatusNotification(ctx context.Context, status string) error {
+	request := v201.FirmwareStatusNotificationRequest{Status: v201.FirmwareStatusNotificationRequestFirmwareStatusEnum(status)}
+	if id := sim.lastFirmwareRequestID.Load(); id >= 0 {
+		requestID := int(id)
+		request.RequestID = &requestID
+	}
+	_, err := callAndEmit[v201.FirmwareStatusNotificationRequest, v201.FirmwareStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "FirmwareStatusNotification", request)
+	return err
+}
+
+// SendDiagnosticsStatusNotification maps to 2.0.1/2.1's LogStatusNotification
+// — see the Simulator interface doc comment for why this is named after 1.6's
+// concept instead of "SendLogStatusNotification".
+func (sim *v201Simulator) SendDiagnosticsStatusNotification(ctx context.Context, status string) error {
+	request := v201.LogStatusNotificationRequest{Status: v201.LogStatusNotificationRequestUploadLogStatusEnum(status)}
+	if id := sim.lastLogRequestID.Load(); id >= 0 {
+		requestID := int(id)
+		request.RequestID = &requestID
+	}
+	_, err := callAndEmit[v201.LogStatusNotificationRequest, v201.LogStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "LogStatusNotification", request)
 	return err
 }
 

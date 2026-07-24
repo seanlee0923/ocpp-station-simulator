@@ -200,6 +200,30 @@ func (app *App) sendStatusNotification(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (app *App) sendFirmwareStatusNotification(c *gin.Context) {
+	var body statusOnlyRequest
+	managed, ok := app.bindAndGetManaged(c, &body)
+	if !ok {
+		return
+	}
+	if err := managed.Sim.SendFirmwareStatusNotification(c.Request.Context(), body.Status); app.fail(c, err) {
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (app *App) sendDiagnosticsStatusNotification(c *gin.Context) {
+	var body statusOnlyRequest
+	managed, ok := app.bindAndGetManaged(c, &body)
+	if !ok {
+		return
+	}
+	if err := managed.Sim.SendDiagnosticsStatusNotification(c.Request.Context(), body.Status); app.fail(c, err) {
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 const defaultEventLimit = 200
 
 func (app *App) listEvents(c *gin.Context) {

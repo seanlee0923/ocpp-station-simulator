@@ -108,6 +108,16 @@ type Simulator interface {
 	SendMeterValues(ctx context.Context, req MeterValuesRequest) error
 	StopTransaction(ctx context.Context, req StopTxRequest) error
 	SendStatusNotification(ctx context.Context, req StatusRequest) error
+	// SendFirmwareStatusNotification and SendDiagnosticsStatusNotification
+	// are the operator-driven follow-up to a CSMS-initiated UpdateFirmware /
+	// GetDiagnostics (1.6) or GetLog (2.0.1/2.1) request — see the
+	// handleUpdateFirmware/handleGetDiagnostics/handleGetLog handlers in
+	// each version adapter, which auto-accept the request itself and just
+	// emit an event; the operator then picks whichever status to report
+	// next from the UI, same "no automatic progression" philosophy as
+	// MeterValues.
+	SendFirmwareStatusNotification(ctx context.Context, status string) error
+	SendDiagnosticsStatusNotification(ctx context.Context, status string) error
 
 	Events() <-chan Event
 }

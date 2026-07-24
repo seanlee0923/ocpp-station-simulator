@@ -116,3 +116,16 @@ export const MEASURAND_PRESETS = [
   'SoC',
   'Temperature',
 ]
+
+// Common to 1.6's FirmwareStatusNotification and 2.0.1/2.1's (richer) enum —
+// this subset is valid on both, which keeps one dropdown instead of two.
+export const FIRMWARE_STATUS_VALUES = [
+  'Downloading', 'Downloaded', 'DownloadFailed', 'Installing', 'Installed', 'InstallationFailed', 'Idle',
+]
+
+// 1.6's DiagnosticsStatusNotification vs 2.0.1/2.1's LogStatusNotification
+// spell the failure case differently ("UploadFailed" vs "UploadFailure").
+export const DIAGNOSTICS_STATUS_VALUES_16 = ['Idle', 'Uploading', 'Uploaded', 'UploadFailed']
+export const DIAGNOSTICS_STATUS_VALUES_2X = [
+  'Idle', 'Uploading', 'Uploaded', 'UploadFailure', 'BadMessage', 'NotSupportedOperation', 'PermissionDenied',
+]

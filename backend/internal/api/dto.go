@@ -103,3 +103,6 @@ type stopTxRequest struct {
 }
 type meterValuesRequest = simulator.MeterValuesRequest
 type statusRequest = simulator.StatusRequest
+type statusOnlyRequest struct {
+	Status string `json:"status" binding:"required"`
+}

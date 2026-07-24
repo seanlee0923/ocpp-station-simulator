@@ -27,6 +27,8 @@ func RegisterRoutes(router *gin.Engine, app *App) {
 	group.POST("/:id/authorize", app.sendAuthorize)
 	group.POST("/:id/meter-values", app.sendMeterValues)
 	group.POST("/:id/status-notification", app.sendStatusNotification)
+	group.POST("/:id/firmware-status-notification", app.sendFirmwareStatusNotification)
+	group.POST("/:id/diagnostics-status-notification", app.sendDiagnosticsStatusNotification)
 	group.POST("/:id/transactions/start", app.startTransaction)
 	group.POST("/:id/transactions/:txId/stop", app.stopTransaction)
 	group.GET("/:id/events", app.listEvents)
