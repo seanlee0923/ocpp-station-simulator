@@ -1,9 +1,61 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { DATA_TRANSFER_STATUS_VALUES, type DataTransferHandlerRow } from '../types/station'
 
 interface Props {
   stationId: string
+}
+
+interface JsonFieldProps {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+}
+
+// A plain textarea plus a "format" button and live validity feedback — not
+// a real code editor (no syntax highlighting/autocomplete), but covers the
+// actual pain point of hand-typing DataTransfer's vendor-defined JSON in a
+// single-line input without pulling in a CodeMirror/Monaco dependency for
+// what's a small payload field in an internal test tool. The field accepts
+// plain non-JSON text too (DataTransfer.Data is just a string on the wire),
+// so invalid JSON is flagged, never blocked.
+function JsonField({ value, onChange, placeholder }: JsonFieldProps) {
+  const validity = useMemo(() => {
+    if (!value.trim()) return null
+    try {
+      JSON.parse(value)
+      return 'valid' as const
+    } catch (err) {
+      return err instanceof Error ? err.message : 'invalid JSON'
+    }
+  }, [value])
+
+  const format = () => {
+    try {
+      onChange(JSON.stringify(JSON.parse(value), null, 2))
+    } catch {
+      // leave the text as-is; the validity message below already explains why
+    }
+  }
+
+  return (
+    <div className="json-field">
+      <textarea
+        className="json-textarea"
+        rows={4}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <div className="json-field-footer">
+        {validity === 'valid' && <span className="json-valid small">유효한 JSON</span>}
+        {validity && validity !== 'valid' && <span className="error small">{validity}</span>}
+        <button type="button" className="small-btn" onClick={format} disabled={validity !== 'valid'}>
+          포맷
+        </button>
+      </div>
+    </div>
+  )
 }
 
 // DataTransfer's payload is entirely vendor-defined, so there's no schema to
@@ -94,8 +146,8 @@ export function DataTransferPanel({ stationId }: Props) {
           ))}
         </select>
       </div>
+      <JsonField value={data} onChange={setData} placeholder="응답 data (JSON 또는 텍스트, 선택)" />
       <div className="row">
-        <input placeholder='응답 data (JSON 또는 텍스트, 선택)' value={data} onChange={(event) => setData(event.target.value)} style={{ flex: 1 }} />
         <button disabled={!!busy || !vendorID} onClick={register}>규칙 등록</button>
       </div>
 
@@ -104,8 +156,8 @@ export function DataTransferPanel({ stationId }: Props) {
         <input placeholder="vendorId" value={sendVendorID} onChange={(event) => setSendVendorID(event.target.value)} />
         <input placeholder="messageId (선택)" value={sendMessageID} onChange={(event) => setSendMessageID(event.target.value)} />
       </div>
+      <JsonField value={sendData} onChange={setSendData} placeholder="data (JSON 또는 텍스트, 선택)" />
       <div className="row">
-        <input placeholder="data (선택)" value={sendData} onChange={(event) => setSendData(event.target.value)} style={{ flex: 1 }} />
         <button disabled={!!busy || !sendVendorID} onClick={send}>DataTransfer 전송</button>
       </div>
       {sendResult && <p className="muted small">응답: {sendResult}</p>}

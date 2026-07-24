@@ -211,6 +211,26 @@ input, select {
   padding: 2px 8px;
 }
 
+.json-field { margin-bottom: 10px; }
+.json-textarea {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--code-bg);
+  color: var(--text-h);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  resize: vertical;
+}
+.json-field-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.json-valid { color: var(--ok); }
+
 /* --- event log --- */
 .event-log {
   border: 1px solid var(--border);
