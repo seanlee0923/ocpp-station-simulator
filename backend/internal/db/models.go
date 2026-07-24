@@ -12,11 +12,19 @@ import (
 // truth for what exists; internal/simulator's registry is the runtime
 // reflection of whichever of these are currently connecting/connected.
 type Station struct {
-	ID                    string `gorm:"type:varchar(64);primaryKey"`
-	Identity              string `gorm:"type:varchar(255);index"`
-	CSMSURL               string `gorm:"type:varchar(1024)"`
-	Version               string `gorm:"type:varchar(16)"`
-	BasicAuthUser         string `gorm:"type:varchar(255)"`
+	ID            string `gorm:"type:varchar(64);primaryKey"`
+	Identity      string `gorm:"type:varchar(255);index"`
+	CSMSURL       string `gorm:"type:varchar(1024)"`
+	Version       string `gorm:"type:varchar(16)"`
+	BasicAuthUser string `gorm:"type:varchar(255)"`
+	// BasicAuthPass is stored in plaintext — an accepted tradeoff for this
+	// internal test tool (see plan): without it, the registry can't rebuild
+	// a Basic-Auth-secured station's connection after a backend restart
+	// (the in-memory registry is empty on every boot; only the DB row
+	// survives), which is exactly the "connect button stops working after
+	// a redeploy" bug this field fixes. Never returned by the station API —
+	// see toStationResponse.
+	BasicAuthPass         string `gorm:"type:varchar(255)"`
 	ConnectorCount        int    `gorm:"default:1"`     // physical charge points commonly expose 2+ connectors sharing one identity/session
 	InsecureSkipTLSVerify bool   `gorm:"default:false"` // wss:// only; test CSMS with a self-signed/internal CA cert
 	CreatedBy             string `gorm:"type:varchar(255)"`

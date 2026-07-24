@@ -37,7 +37,7 @@ func (app *App) createStation(c *gin.Context) {
 	}
 	row := db.Station{
 		ID: id, Identity: body.Identity, CSMSURL: body.CSMSURL, Version: body.Version,
-		ConnectorCount: connectorCount, BasicAuthUser: body.BasicAuthUser,
+		ConnectorCount: connectorCount, BasicAuthUser: body.BasicAuthUser, BasicAuthPass: body.BasicAuthPass,
 		InsecureSkipTLSVerify: body.InsecureSkipTLSVerify, CreatedBy: actor,
 		LastKnownStatus: "connecting",
 	}
@@ -96,17 +96,50 @@ func (app *App) deleteStation(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// connectStation is the one place that must tolerate the station not being
+// in the in-memory Registry at all (every other action handler's
+// mustGetManaged 404s for that case, which is correct for them — you
+// shouldn't be able to Authorize a station you haven't connected). The
+// registry starts empty on every backend restart/redeploy by design (see
+// plan), so without this fallback, "연결" would permanently 404 for any
+// station that was connected before a restart, with no way to recover it
+// short of deleting and recreating it.
 func (app *App) connectStation(c *gin.Context) {
-	managed, ok := app.mustGetManaged(c)
-	if !ok {
+	id := c.Param("id")
+	actor := actorFrom(c)
+
+	managed, err := app.Registry.Get(id)
+	if errors.Is(err, simulator.ErrNotFound) {
+		var row db.Station
+		if dbErr := app.DB.First(&row, "id = ?", id).Error; dbErr != nil {
+			if errors.Is(dbErr, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "station not found"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": dbErr.Error()})
+			}
+			return
+		}
+		cfg := simulator.StationConfig{
+			Identity: row.Identity, CSMSURL: row.CSMSURL, Version: row.Version,
+			BasicAuthUser: row.BasicAuthUser, BasicAuthPass: row.BasicAuthPass,
+			InsecureSkipTLSVerify: row.InsecureSkipTLSVerify,
+		}
+		// Registry.Create already starts connecting — no separate Reconnect call needed.
+		managed, err = app.Registry.Create(id, cfg)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-	app.Actors.set(managed.ID, actorFrom(c))
-	if err := app.Registry.Reconnect(managed.ID); err != nil {
+	} else if err := app.Registry.Reconnect(managed.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	app.Writer.enqueue(db.StationEvent{StationID: managed.ID, Actor: actorFrom(c), EventType: "connect_requested"})
+
+	app.Actors.set(managed.ID, actor)
+	app.Writer.enqueue(db.StationEvent{StationID: managed.ID, Actor: actor, EventType: "connect_requested"})
 	c.Status(http.StatusNoContent)
 }
 
