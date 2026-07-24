@@ -16,16 +16,17 @@
 
 ```sh
 docker build -t ocpp-station-simulator .
-docker run -d -p 8080:8080 \
+# 호스트에 이미 8080을 쓰는 다른 서비스가 있으면 왼쪽 포트만 바꾸면 된다.
+docker run -d -p ${HOST_PORT:-8080}:8080 \
   -e ADMIN_USER=admin -e ADMIN_PASS=change-me \
   -v ocpp-data:/data \
   ocpp-station-simulator
 ```
 
-또는 `docker compose`:
+또는 `docker compose` (같은 이유로 `HOST_PORT` 지원):
 
 ```sh
-ADMIN_USER=admin ADMIN_PASS=change-me docker compose up -d --build
+HOST_PORT=8081 ADMIN_USER=admin ADMIN_PASS=change-me docker compose up -d --build
 ```
 
 `docker-compose.yml`은 기본적으로 SQLite + 명명된 볼륨(`ocpp-data`)으로 동작한다. 사내 MySQL을 쓰려면 `DB_DRIVER=mysql DB_DSN=...` 환경변수를 같이 넘기면 된다 (아래 설정 표 참고).
@@ -36,7 +37,8 @@ ADMIN_USER=admin ADMIN_PASS=change-me docker compose up -d --build
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `PORT` / `-port` | `8080` | HTTP 포트 |
+| `PORT` / `-port` | `8080` | 프로세스(컨테이너 내부)가 리슨하는 포트 |
+| `HOST_PORT` (Docker/compose 전용) | `8080` | 호스트에 매핑할 포트. 호스트의 8080이 이미 다른 서비스가 쓰고 있을 때 이것만 바꾸면 됨 |
 | `DB_DRIVER` / `-db-driver` | `sqlite` | `sqlite` 또는 `mysql` |
 | `DB_DSN` / `-db-dsn` | `./data/ocpp-simulator.db` (Docker는 `/data/...`) | sqlite 파일 경로, 또는 mysql DSN |
 | `ADMIN_USER` / `ADMIN_PASS` | (없음) | 지정하면 기동마다 이 자격으로 관리자 계정을 갱신. 없으면 최초 기동 시 임시 관리자를 생성하고 비밀번호를 로그에 한 번 출력 |
