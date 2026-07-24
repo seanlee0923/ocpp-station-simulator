@@ -12,23 +12,27 @@ interface JsonFieldProps {
   placeholder?: string
 }
 
-// A plain textarea plus a "format" button and live validity feedback — not
-// a real code editor (no syntax highlighting/autocomplete), but covers the
-// actual pain point of hand-typing DataTransfer's vendor-defined JSON in a
-// single-line input without pulling in a CodeMirror/Monaco dependency for
-// what's a small payload field in an internal test tool. The field accepts
-// plain non-JSON text too (DataTransfer.Data is just a string on the wire),
-// so invalid JSON is flagged, never blocked.
+// A plain textarea plus a JSON on/off toggle — not a real code editor (no
+// syntax highlighting/autocomplete), but covers the actual pain point of
+// hand-typing DataTransfer's vendor-defined JSON in a single-line input,
+// without pulling in a CodeMirror/Monaco dependency for what's a small
+// payload field in an internal test tool. The toggle exists because
+// DataTransfer.Data is just a string on the wire — some vendors send plain
+// text, not JSON — so JSON validation/formatting is opt-in, not assumed.
+// The raw text is sent as-is either way; the toggle only controls whether
+// this UI assists with it.
 function JsonField({ value, onChange, placeholder }: JsonFieldProps) {
+  const [jsonMode, setJsonMode] = useState(true)
+
   const validity = useMemo(() => {
-    if (!value.trim()) return null
+    if (!jsonMode || !value.trim()) return null
     try {
       JSON.parse(value)
       return 'valid' as const
     } catch (err) {
       return err instanceof Error ? err.message : 'invalid JSON'
     }
-  }, [value])
+  }, [jsonMode, value])
 
   const format = () => {
     try {
@@ -48,11 +52,18 @@ function JsonField({ value, onChange, placeholder }: JsonFieldProps) {
         onChange={(event) => onChange(event.target.value)}
       />
       <div className="json-field-footer">
-        {validity === 'valid' && <span className="json-valid small">유효한 JSON</span>}
-        {validity && validity !== 'valid' && <span className="error small">{validity}</span>}
-        <button type="button" className="small-btn" onClick={format} disabled={validity !== 'valid'}>
-          포맷
-        </button>
+        <label className="toggle-switch">
+          <input type="checkbox" checked={jsonMode} onChange={(event) => setJsonMode(event.target.checked)} />
+          <span className="toggle-slider" />
+        </label>
+        <span className="small muted">JSON</span>
+        {jsonMode && validity === 'valid' && <span className="json-valid small">유효한 JSON</span>}
+        {jsonMode && validity && validity !== 'valid' && <span className="error small">{validity}</span>}
+        {jsonMode && (
+          <button type="button" className="small-btn" onClick={format} disabled={validity !== 'valid'}>
+            포맷
+          </button>
+        )}
       </div>
     </div>
   )
