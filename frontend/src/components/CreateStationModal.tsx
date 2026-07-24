@@ -12,6 +12,7 @@ export function CreateStationModal({ onCreate, onClose }: Props) {
   const [version, setVersion] = useState<OcppVersion>('1.6')
   const [connectorCount, setConnectorCount] = useState(1)
   const [basicAuthUser, setBasicAuthUser] = useState('')
+  const [basicAuthUserTouched, setBasicAuthUserTouched] = useState(false)
   const [basicAuthPass, setBasicAuthPass] = useState('')
   const [insecureSkipTlsVerify, setInsecureSkipTlsVerify] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -46,7 +47,21 @@ export function CreateStationModal({ onCreate, onClose }: Props) {
         <form onSubmit={submit} className="form">
           <label>
             Identity (충전소 식별자)
-            <input required value={identity} onChange={(event) => setIdentity(event.target.value)} placeholder="CP-001" />
+            <input
+              required
+              value={identity}
+              onChange={(event) => {
+                const value = event.target.value
+                setIdentity(value)
+                // Most CSMS (including this app's own, by default) require
+                // the Basic Auth username to equal the charge point identity
+                // — see csms/security.go's AllowBasicUsernameMismatch check.
+                // Keep them in sync until the operator explicitly edits the
+                // username field themselves.
+                if (!basicAuthUserTouched) setBasicAuthUser(value)
+              }}
+              placeholder="CP-001"
+            />
           </label>
           <label>
             CSMS URL
@@ -78,8 +93,14 @@ export function CreateStationModal({ onCreate, onClose }: Props) {
           <fieldset>
             <legend>Basic Auth (선택)</legend>
             <label>
-              Username
-              <input value={basicAuthUser} onChange={(event) => setBasicAuthUser(event.target.value)} />
+              Username (기본값: Identity와 동일 — 필요 시 직접 수정)
+              <input
+                value={basicAuthUser}
+                onChange={(event) => {
+                  setBasicAuthUser(event.target.value)
+                  setBasicAuthUserTouched(true)
+                }}
+              />
             </label>
             <label>
               Password
