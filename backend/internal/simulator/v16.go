@@ -3,6 +3,8 @@ package simulator
 import (
 	"context"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/seanlee0923/ocpp/protocol"
@@ -13,11 +15,40 @@ import (
 type v16Simulator struct {
 	eventBus
 	dataTransferMatcher
-	station *station.Station
+	configStore configStore
+
+	// mu protects cfg and runCtx, both mutated only by a credential
+	// rotation (see rotateBasicAuthPassword). stationPtr is separate and
+	// lock-free (atomic.Pointer) since every SendXxx/handleXxx method reads
+	// it on the hot path and a rotation must be able to swap it without
+	// blocking them.
+	mu         sync.Mutex
+	cfg        StationConfig
+	runCtx     context.Context
+	stationPtr atomic.Pointer[station.Station]
 }
 
 func newV16Simulator(cfg StationConfig) (Simulator, error) {
-	sim := &v16Simulator{eventBus: newEventBus(), dataTransferMatcher: newDataTransferMatcher()}
+	sim := &v16Simulator{eventBus: newEventBus(), dataTransferMatcher: newDataTransferMatcher(), configStore: newConfigStore(), cfg: cfg}
+	st, err := sim.buildStation()
+	if err != nil {
+		return nil, err
+	}
+	sim.stationPtr.Store(st)
+	return sim, nil
+}
+
+// buildStation creates a fresh station.Station from sim.cfg and registers
+// every inbound handler on it. It's used both at construction and by
+// rotateBasicAuthPassword — station.Config (including BasicAuth) is
+// immutable once built, so rotating credentials means building a whole new
+// instance, and both paths must register the exact same handler set or a
+// rotation would silently lose handlers.
+func (sim *v16Simulator) buildStation() (*station.Station, error) {
+	sim.mu.Lock()
+	cfg := sim.cfg
+	sim.mu.Unlock()
+
 	st, err := station.New(station.Config{
 		URL:             cfg.CSMSURL,
 		Identity:        cfg.Identity,
@@ -31,37 +62,63 @@ func newV16Simulator(cfg StationConfig) (Simulator, error) {
 	if err != nil {
 		return nil, err
 	}
-	sim.station = st
-
-	if err := station.Handle(st, sim.handleRemoteStart); err != nil {
-		return nil, err
+	handlers := []func() error{
+		func() error { return station.Handle(st, sim.handleRemoteStart) },
+		func() error { return station.Handle(st, sim.handleRemoteStop) },
+		func() error { return station.Handle(st, sim.handleReset) },
+		func() error { return station.Handle(st, sim.handleUpdateFirmware) },
+		func() error { return station.Handle(st, sim.handleGetDiagnostics) },
+		func() error { return station.Handle(st, sim.handleDataTransfer) },
+		func() error { return station.Handle(st, sim.handleChangeConfiguration) },
+		func() error { return station.Handle(st, sim.handleGetConfiguration) },
 	}
-	if err := station.Handle(st, sim.handleRemoteStop); err != nil {
-		return nil, err
+	for _, register := range handlers {
+		if err := register(); err != nil {
+			return nil, err
+		}
 	}
-	if err := station.Handle(st, sim.handleReset); err != nil {
-		return nil, err
-	}
-	if err := station.Handle(st, sim.handleUpdateFirmware); err != nil {
-		return nil, err
-	}
-	if err := station.Handle(st, sim.handleGetDiagnostics); err != nil {
-		return nil, err
-	}
-	if err := station.Handle(st, sim.handleDataTransfer); err != nil {
-		return nil, err
-	}
-	return sim, nil
+	return st, nil
 }
 
+func (sim *v16Simulator) st() *station.Station { return sim.stationPtr.Load() }
+
 func (sim *v16Simulator) Connect(ctx context.Context) error {
-	go func() { _ = sim.station.Run(ctx) }()
+	sim.mu.Lock()
+	sim.runCtx = ctx
+	sim.mu.Unlock()
+	go func() { _ = sim.st().Run(ctx) }()
 	return nil
 }
 
-func (sim *v16Simulator) Disconnect() { sim.station.Stop() }
+func (sim *v16Simulator) Disconnect() { sim.st().Stop() }
 
-func (sim *v16Simulator) State() station.ConnectionState { return sim.station.State() }
+func (sim *v16Simulator) State() station.ConnectionState { return sim.st().State() }
+
+// rotateBasicAuthPassword implements the AuthorizationKey side effect a real
+// charge point has: build a new station.Station with the updated password,
+// swap it in, stop the old one, and reconnect using the context Connect was
+// originally called with. Runs in its own goroutine (see
+// handleChangeConfiguration) so the CALLRESULT for the triggering
+// ChangeConfiguration isn't held up by a disconnect/reconnect cycle.
+func (sim *v16Simulator) rotateBasicAuthPassword(newPassword string) {
+	sim.mu.Lock()
+	sim.cfg.BasicAuthPass = newPassword
+	ctx := sim.runCtx
+	sim.mu.Unlock()
+	if ctx == nil {
+		return // never connected yet; the new password takes effect whenever Connect() first runs
+	}
+
+	newStation, err := sim.buildStation()
+	if err != nil {
+		sim.emitMessage(EventMessageReceived, "ChangeConfiguration", "error", map[string]string{"error": "failed to rebuild connection: " + err.Error()})
+		return
+	}
+	if old := sim.stationPtr.Swap(newStation); old != nil {
+		old.Stop()
+	}
+	go func() { _ = newStation.Run(ctx) }()
+}
 
 // handleRemoteStart, handleRemoteStop, and handleReset always answer
 // Accepted: a real charge point typically acknowledges a remote command
@@ -130,6 +187,48 @@ func (sim *v16Simulator) UnregisterDataTransferResponse(vendorID, messageID stri
 	sim.unregister(vendorID, messageID)
 }
 
+// handleChangeConfiguration stores every key as-is. AuthorizationKey
+// specifically also triggers a credential rotation (see
+// rotateBasicAuthPassword) — spawned in its own goroutine so this handler's
+// own Accepted response isn't held up by the disconnect/reconnect it causes.
+func (sim *v16Simulator) handleChangeConfiguration(_ context.Context, req v16.ChangeConfigurationRequest) (v16.ChangeConfigurationConfirmation, error) {
+	sim.emitRemoteCommand("ChangeConfiguration", req)
+	sim.configStore.set(req.Key, req.Value)
+	if req.Key == "AuthorizationKey" {
+		go sim.rotateBasicAuthPassword(req.Value)
+	}
+	return v16.ChangeConfigurationConfirmation{Status: v16.ChangeConfigurationConfirmationStatusAccepted}, nil
+}
+
+// handleGetConfiguration never discloses AuthorizationKey's value — real
+// charge points treat it as write-only so the password never travels back
+// over the (already-authenticated, but still) wire.
+func (sim *v16Simulator) handleGetConfiguration(_ context.Context, req v16.GetConfigurationRequest) (v16.GetConfigurationConfirmation, error) {
+	sim.emitRemoteCommand("GetConfiguration", req)
+	keys := req.Key
+	if len(keys) == 0 {
+		for key := range sim.configStore.all() {
+			keys = append(keys, key)
+		}
+	}
+	var confirmation v16.GetConfigurationConfirmation
+	for _, key := range keys {
+		value, ok := sim.configStore.get(key)
+		if !ok {
+			confirmation.UnknownKey = append(confirmation.UnknownKey, key)
+			continue
+		}
+		item := v16.GetConfigurationConfirmationConfigurationKeyItem{Key: key}
+		if key != "AuthorizationKey" {
+			item.Value = &value
+		}
+		confirmation.ConfigurationKey = append(confirmation.ConfigurationKey, item)
+	}
+	return confirmation, nil
+}
+
+func (sim *v16Simulator) GetConfigValues() map[string]string { return sim.configStore.all() }
+
 func (sim *v16Simulator) SendBootNotification(ctx context.Context, fields BootFields) (BootResult, error) {
 	var serial *string
 	if fields.SerialNumber != "" {
@@ -145,7 +244,7 @@ func (sim *v16Simulator) SendBootNotification(ctx context.Context, fields BootFi
 		ChargePointSerialNumber: serial,
 		FirmwareVersion:         firmware,
 	}
-	confirmation, err := callAndEmit[v16.BootNotificationRequest, v16.BootNotificationConfirmation](ctx, &sim.eventBus, sim.station, "BootNotification", req)
+	confirmation, err := callAndEmit[v16.BootNotificationRequest, v16.BootNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "BootNotification", req)
 	if err != nil {
 		return BootResult{}, err
 	}
@@ -153,7 +252,7 @@ func (sim *v16Simulator) SendBootNotification(ctx context.Context, fields BootFi
 }
 
 func (sim *v16Simulator) SendAuthorize(ctx context.Context, idTag string) (AuthorizeResult, error) {
-	confirmation, err := callAndEmit[v16.AuthorizeRequest, v16.AuthorizeConfirmation](ctx, &sim.eventBus, sim.station, "Authorize", v16.AuthorizeRequest{IDTag: idTag})
+	confirmation, err := callAndEmit[v16.AuthorizeRequest, v16.AuthorizeConfirmation](ctx, &sim.eventBus, sim.st(), "Authorize", v16.AuthorizeRequest{IDTag: idTag})
 	if err != nil {
 		return AuthorizeResult{}, err
 	}
@@ -167,7 +266,7 @@ func (sim *v16Simulator) StartTransaction(ctx context.Context, req StartTxReques
 		MeterStart:  req.MeterStart,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
-	confirmation, err := callAndEmit[v16.StartTransactionRequest, v16.StartTransactionConfirmation](ctx, &sim.eventBus, sim.station, "StartTransaction", request)
+	confirmation, err := callAndEmit[v16.StartTransactionRequest, v16.StartTransactionConfirmation](ctx, &sim.eventBus, sim.st(), "StartTransaction", request)
 	if err != nil {
 		return StartTxResult{}, err
 	}
@@ -185,7 +284,7 @@ func (sim *v16Simulator) StopTransaction(ctx context.Context, req StopTxRequest)
 		TransactionID: transactionID,
 		Reason:        stopReason16(req.Reason),
 	}
-	_, err = callAndEmit[v16.StopTransactionRequest, v16.StopTransactionConfirmation](ctx, &sim.eventBus, sim.station, "StopTransaction", request)
+	_, err = callAndEmit[v16.StopTransactionRequest, v16.StopTransactionConfirmation](ctx, &sim.eventBus, sim.st(), "StopTransaction", request)
 	return err
 }
 
@@ -217,7 +316,7 @@ func (sim *v16Simulator) SendMeterValues(ctx context.Context, req MeterValuesReq
 			SampledValue: samples,
 		}},
 	}
-	_, err := callAndEmit[v16.MeterValuesRequest, v16.MeterValuesConfirmation](ctx, &sim.eventBus, sim.station, "MeterValues", request)
+	_, err := callAndEmit[v16.MeterValuesRequest, v16.MeterValuesConfirmation](ctx, &sim.eventBus, sim.st(), "MeterValues", request)
 	return err
 }
 
@@ -236,19 +335,19 @@ func (sim *v16Simulator) SendStatusNotification(ctx context.Context, req StatusR
 		Status:      v16.StatusNotificationRequestStatus(req.Status),
 		Info:        info,
 	}
-	_, err := callAndEmit[v16.StatusNotificationRequest, v16.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "StatusNotification", request)
+	_, err := callAndEmit[v16.StatusNotificationRequest, v16.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "StatusNotification", request)
 	return err
 }
 
 func (sim *v16Simulator) SendFirmwareStatusNotification(ctx context.Context, status string) error {
 	request := v16.FirmwareStatusNotificationRequest{Status: v16.FirmwareStatusNotificationRequestStatus(status)}
-	_, err := callAndEmit[v16.FirmwareStatusNotificationRequest, v16.FirmwareStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "FirmwareStatusNotification", request)
+	_, err := callAndEmit[v16.FirmwareStatusNotificationRequest, v16.FirmwareStatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "FirmwareStatusNotification", request)
 	return err
 }
 
 func (sim *v16Simulator) SendDiagnosticsStatusNotification(ctx context.Context, status string) error {
 	request := v16.DiagnosticsStatusNotificationRequest{Status: v16.DiagnosticsStatusNotificationRequestStatus(status)}
-	_, err := callAndEmit[v16.DiagnosticsStatusNotificationRequest, v16.DiagnosticsStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "DiagnosticsStatusNotification", request)
+	_, err := callAndEmit[v16.DiagnosticsStatusNotificationRequest, v16.DiagnosticsStatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "DiagnosticsStatusNotification", request)
 	return err
 }
 
@@ -260,7 +359,7 @@ func (sim *v16Simulator) SendDataTransfer(ctx context.Context, vendorID, message
 	if data != "" {
 		request.Data = &data
 	}
-	confirmation, err := callAndEmit[v16.DataTransferRequest, v16.DataTransferConfirmation](ctx, &sim.eventBus, sim.station, "DataTransfer", request)
+	confirmation, err := callAndEmit[v16.DataTransferRequest, v16.DataTransferConfirmation](ctx, &sim.eventBus, sim.st(), "DataTransfer", request)
 	if err != nil {
 		return DataTransferResult{}, err
 	}

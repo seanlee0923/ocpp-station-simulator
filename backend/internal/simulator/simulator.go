@@ -127,6 +127,11 @@ type Simulator interface {
 	UnregisterDataTransferResponse(vendorID, messageID string)
 	SendDataTransfer(ctx context.Context, vendorID, messageID, data string) (DataTransferResult, error)
 
+	// GetConfigValues snapshots every key/value the CSMS has set so far via
+	// ChangeConfiguration (1.6) or SetVariables (2.0.1/2.1) — see
+	// configStore. Purely CSMS-driven; there is no operator-facing setter.
+	GetConfigValues() map[string]string
+
 	Events() <-chan Event
 }
 

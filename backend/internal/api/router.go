@@ -35,6 +35,7 @@ func RegisterRoutes(router *gin.Engine, app *App) {
 	group.DELETE("/:id/data-transfer-handlers/:handlerId", app.deleteDataTransferHandler)
 	group.POST("/:id/transactions/start", app.startTransaction)
 	group.POST("/:id/transactions/:txId/stop", app.stopTransaction)
+	group.GET("/:id/config", app.getStationConfig)
 	group.GET("/:id/events", app.listEvents)
 	group.GET("/:id/ws", app.streamEvents)
 }

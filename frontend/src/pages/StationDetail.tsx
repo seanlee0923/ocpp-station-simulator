@@ -5,6 +5,7 @@ import type { Station, StationEventRow, WsEvent } from '../types/station'
 import { ConnectorPanel } from '../components/ConnectorPanel'
 import { MaintenancePanel } from '../components/MaintenancePanel'
 import { DataTransferPanel } from '../components/DataTransferPanel'
+import { ConfigPanel } from '../components/ConfigPanel'
 import { EventLog } from '../components/EventLog'
 
 interface Props {
@@ -107,6 +108,7 @@ export function StationDetail({ stationId, onBack }: Props) {
             ))}
             <MaintenancePanel stationId={stationId} version={station.version} />
             <DataTransferPanel stationId={stationId} />
+            <ConfigPanel stationId={stationId} />
           </div>
         </>
       )}

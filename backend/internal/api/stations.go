@@ -241,6 +241,19 @@ func (app *App) listEvents(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// getStationConfig returns whatever the CSMS has set so far via
+// ChangeConfiguration (1.6) or SetVariables (2.0.1/2.1) — see
+// simulator.configStore. Only meaningful while the station is connected in
+// this process; there's nothing to return for a station that isn't
+// currently running (see mustGetManaged's 404 for why).
+func (app *App) getStationConfig(c *gin.Context) {
+	managed, ok := app.mustGetManaged(c)
+	if !ok {
+		return
+	}
+	c.JSON(http.StatusOK, managed.Sim.GetConfigValues())
+}
+
 // --- shared helpers ---
 
 // mustFindStation always looks up Unscoped (soft-deleted stations included):

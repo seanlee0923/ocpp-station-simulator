@@ -3,6 +3,7 @@ package simulator
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 type v201Simulator struct {
 	eventBus
 	dataTransferMatcher
-	station *station.Station
+	configStore configStore
 	// lastFirmwareRequestID/lastLogRequestID cache the requestId a CSMS sent
 	// with its most recent UpdateFirmware/GetLog, so the operator-triggered
 	// FirmwareStatusNotification/LogStatusNotification (see
@@ -25,12 +26,33 @@ type v201Simulator struct {
 	// field (not persisted) is enough. -1 means "none seen yet".
 	lastFirmwareRequestID atomic.Int64
 	lastLogRequestID      atomic.Int64
+
+	// mu protects cfg and runCtx — see v16Simulator's identical fields for
+	// why (credential rotation via rebuilding station.Station).
+	mu         sync.Mutex
+	cfg        StationConfig
+	runCtx     context.Context
+	stationPtr atomic.Pointer[station.Station]
 }
 
 func newV201Simulator(cfg StationConfig) (Simulator, error) {
-	sim := &v201Simulator{eventBus: newEventBus(), dataTransferMatcher: newDataTransferMatcher()}
+	sim := &v201Simulator{eventBus: newEventBus(), dataTransferMatcher: newDataTransferMatcher(), configStore: newConfigStore(), cfg: cfg}
 	sim.lastFirmwareRequestID.Store(-1)
 	sim.lastLogRequestID.Store(-1)
+	st, err := sim.buildStation()
+	if err != nil {
+		return nil, err
+	}
+	sim.stationPtr.Store(st)
+	return sim, nil
+}
+
+// buildStation mirrors v16Simulator.buildStation — see its doc comment.
+func (sim *v201Simulator) buildStation() (*station.Station, error) {
+	sim.mu.Lock()
+	cfg := sim.cfg
+	sim.mu.Unlock()
+
 	st, err := station.New(station.Config{
 		URL:             cfg.CSMSURL,
 		Identity:        cfg.Identity,
@@ -44,37 +66,59 @@ func newV201Simulator(cfg StationConfig) (Simulator, error) {
 	if err != nil {
 		return nil, err
 	}
-	sim.station = st
-
-	if err := station.Handle(st, sim.handleRequestStart); err != nil {
-		return nil, err
+	handlers := []func() error{
+		func() error { return station.Handle(st, sim.handleRequestStart) },
+		func() error { return station.Handle(st, sim.handleRequestStop) },
+		func() error { return station.Handle(st, sim.handleReset) },
+		func() error { return station.Handle(st, sim.handleUpdateFirmware) },
+		func() error { return station.Handle(st, sim.handleGetLog) },
+		func() error { return station.Handle(st, sim.handleDataTransfer) },
+		func() error { return station.Handle(st, sim.handleSetVariables) },
+		func() error { return station.Handle(st, sim.handleGetVariables) },
 	}
-	if err := station.Handle(st, sim.handleRequestStop); err != nil {
-		return nil, err
+	for _, register := range handlers {
+		if err := register(); err != nil {
+			return nil, err
+		}
 	}
-	if err := station.Handle(st, sim.handleReset); err != nil {
-		return nil, err
-	}
-	if err := station.Handle(st, sim.handleUpdateFirmware); err != nil {
-		return nil, err
-	}
-	if err := station.Handle(st, sim.handleGetLog); err != nil {
-		return nil, err
-	}
-	if err := station.Handle(st, sim.handleDataTransfer); err != nil {
-		return nil, err
-	}
-	return sim, nil
+	return st, nil
 }
 
+func (sim *v201Simulator) st() *station.Station { return sim.stationPtr.Load() }
+
 func (sim *v201Simulator) Connect(ctx context.Context) error {
-	go func() { _ = sim.station.Run(ctx) }()
+	sim.mu.Lock()
+	sim.runCtx = ctx
+	sim.mu.Unlock()
+	go func() { _ = sim.st().Run(ctx) }()
 	return nil
 }
 
-func (sim *v201Simulator) Disconnect() { sim.station.Stop() }
+func (sim *v201Simulator) Disconnect() { sim.st().Stop() }
 
-func (sim *v201Simulator) State() station.ConnectionState { return sim.station.State() }
+func (sim *v201Simulator) State() station.ConnectionState { return sim.st().State() }
+
+// rotateBasicAuthPassword mirrors v16Simulator.rotateBasicAuthPassword —
+// see its doc comment.
+func (sim *v201Simulator) rotateBasicAuthPassword(newPassword string) {
+	sim.mu.Lock()
+	sim.cfg.BasicAuthPass = newPassword
+	ctx := sim.runCtx
+	sim.mu.Unlock()
+	if ctx == nil {
+		return
+	}
+
+	newStation, err := sim.buildStation()
+	if err != nil {
+		sim.emitMessage(EventMessageReceived, "SetVariables", "error", map[string]string{"error": "failed to rebuild connection: " + err.Error()})
+		return
+	}
+	if old := sim.stationPtr.Swap(newStation); old != nil {
+		old.Stop()
+	}
+	go func() { _ = newStation.Run(ctx) }()
+}
 
 func (sim *v201Simulator) handleRequestStart(_ context.Context, req v201.RequestStartTransactionRequest) (v201.RequestStartTransactionConfirmation, error) {
 	sim.emitRemoteCommand("RequestStartTransaction", req)
@@ -131,6 +175,70 @@ func (sim *v201Simulator) UnregisterDataTransferResponse(vendorID, messageID str
 	sim.unregister(vendorID, messageID)
 }
 
+// handleSetVariables stores every component/variable pair as-is (see
+// variableKey). Component "SecurityCtrlr" / Variable "BasicAuthPassword" is
+// 2.0.1/2.1's equivalent of 1.6's AuthorizationKey and triggers the same
+// credential rotation — spawned in its own goroutine so this handler's own
+// response isn't held up by the disconnect/reconnect it causes.
+func (sim *v201Simulator) handleSetVariables(_ context.Context, req v201.SetVariablesRequest) (v201.SetVariablesConfirmation, error) {
+	sim.emitRemoteCommand("SetVariables", req)
+	results := make([]v201.SetVariablesConfirmationSetVariableResult, 0, len(req.SetVariableData))
+	for _, item := range req.SetVariableData {
+		componentInstance, variableInstance := "", ""
+		if item.Component.Instance != nil {
+			componentInstance = *item.Component.Instance
+		}
+		if item.Variable.Instance != nil {
+			variableInstance = *item.Variable.Instance
+		}
+		sim.configStore.set(variableKey(item.Component.Name, componentInstance, item.Variable.Name, variableInstance), item.AttributeValue)
+		if item.Component.Name == "SecurityCtrlr" && item.Variable.Name == "BasicAuthPassword" {
+			go sim.rotateBasicAuthPassword(item.AttributeValue)
+		}
+		results = append(results, v201.SetVariablesConfirmationSetVariableResult{
+			AttributeStatus: v201.SetVariablesConfirmationSetVariableStatusEnumAccepted,
+			Component:       v201.SetVariablesConfirmationComponent{Name: item.Component.Name, Instance: item.Component.Instance},
+			Variable:        v201.SetVariablesConfirmationVariable{Name: item.Variable.Name, Instance: item.Variable.Instance},
+		})
+	}
+	return v201.SetVariablesConfirmation{SetVariableResult: results}, nil
+}
+
+// handleGetVariables never discloses BasicAuthPassword's value — see
+// v16Simulator.handleGetConfiguration's identical reasoning for
+// AuthorizationKey.
+func (sim *v201Simulator) handleGetVariables(_ context.Context, req v201.GetVariablesRequest) (v201.GetVariablesConfirmation, error) {
+	sim.emitRemoteCommand("GetVariables", req)
+	results := make([]v201.GetVariablesConfirmationGetVariableResult, 0, len(req.GetVariableData))
+	for _, item := range req.GetVariableData {
+		componentInstance, variableInstance := "", ""
+		if item.Component.Instance != nil {
+			componentInstance = *item.Component.Instance
+		}
+		if item.Variable.Instance != nil {
+			variableInstance = *item.Variable.Instance
+		}
+		result := v201.GetVariablesConfirmationGetVariableResult{
+			Component: v201.GetVariablesConfirmationComponent{Name: item.Component.Name, Instance: item.Component.Instance},
+			Variable:  v201.GetVariablesConfirmationVariable{Name: item.Variable.Name, Instance: item.Variable.Instance},
+		}
+		value, ok := sim.configStore.get(variableKey(item.Component.Name, componentInstance, item.Variable.Name, variableInstance))
+		switch {
+		case !ok:
+			result.AttributeStatus = v201.GetVariablesConfirmationGetVariableStatusEnumUnknownVariable
+		case item.Component.Name == "SecurityCtrlr" && item.Variable.Name == "BasicAuthPassword":
+			result.AttributeStatus = v201.GetVariablesConfirmationGetVariableStatusEnumAccepted
+		default:
+			result.AttributeStatus = v201.GetVariablesConfirmationGetVariableStatusEnumAccepted
+			result.AttributeValue = &value
+		}
+		results = append(results, result)
+	}
+	return v201.GetVariablesConfirmation{GetVariableResult: results}, nil
+}
+
+func (sim *v201Simulator) GetConfigValues() map[string]string { return sim.configStore.all() }
+
 func (sim *v201Simulator) SendBootNotification(ctx context.Context, fields BootFields) (BootResult, error) {
 	var serial *string
 	if fields.SerialNumber != "" {
@@ -149,7 +257,7 @@ func (sim *v201Simulator) SendBootNotification(ctx context.Context, fields BootF
 		},
 		Reason: v201.BootNotificationRequestBootReasonEnumPowerUp,
 	}
-	confirmation, err := callAndEmit[v201.BootNotificationRequest, v201.BootNotificationConfirmation](ctx, &sim.eventBus, sim.station, "BootNotification", req)
+	confirmation, err := callAndEmit[v201.BootNotificationRequest, v201.BootNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "BootNotification", req)
 	if err != nil {
 		return BootResult{}, err
 	}
@@ -158,7 +266,7 @@ func (sim *v201Simulator) SendBootNotification(ctx context.Context, fields BootF
 
 func (sim *v201Simulator) SendAuthorize(ctx context.Context, idTag string) (AuthorizeResult, error) {
 	req := v201.AuthorizeRequest{IDToken: v201.AuthorizeRequestIDToken{IDToken: idTag, Type: v201.AuthorizeRequestIDTokenEnumCentral}}
-	confirmation, err := callAndEmit[v201.AuthorizeRequest, v201.AuthorizeConfirmation](ctx, &sim.eventBus, sim.station, "Authorize", req)
+	confirmation, err := callAndEmit[v201.AuthorizeRequest, v201.AuthorizeConfirmation](ctx, &sim.eventBus, sim.st(), "Authorize", req)
 	if err != nil {
 		return AuthorizeResult{}, err
 	}
@@ -183,7 +291,7 @@ func (sim *v201Simulator) StartTransaction(ctx context.Context, req StartTxReque
 		EVSE:    &v201.TransactionEventRequestEVSE{ID: req.EVSEID},
 		IDToken: &v201.TransactionEventRequestIDToken{IDToken: req.IDTag, Type: v201.TransactionEventRequestIDTokenEnumCentral},
 	}
-	_, err := callAndEmit[v201.TransactionEventRequest, v201.TransactionEventConfirmation](ctx, &sim.eventBus, sim.station, "TransactionEvent", request)
+	_, err := callAndEmit[v201.TransactionEventRequest, v201.TransactionEventConfirmation](ctx, &sim.eventBus, sim.st(), "TransactionEvent", request)
 	if err != nil {
 		return StartTxResult{}, err
 	}
@@ -202,7 +310,7 @@ func (sim *v201Simulator) StopTransaction(ctx context.Context, req StopTxRequest
 			StoppedReason: stoppedReason,
 		},
 	}
-	_, err := callAndEmit[v201.TransactionEventRequest, v201.TransactionEventConfirmation](ctx, &sim.eventBus, sim.station, "TransactionEvent", request)
+	_, err := callAndEmit[v201.TransactionEventRequest, v201.TransactionEventConfirmation](ctx, &sim.eventBus, sim.st(), "TransactionEvent", request)
 	return err
 }
 
@@ -223,7 +331,7 @@ func (sim *v201Simulator) SendMeterValues(ctx context.Context, req MeterValuesRe
 			SampledValue: samples,
 		}},
 	}
-	_, err := callAndEmit[v201.MeterValuesRequest, v201.MeterValuesConfirmation](ctx, &sim.eventBus, sim.station, "MeterValues", request)
+	_, err := callAndEmit[v201.MeterValuesRequest, v201.MeterValuesConfirmation](ctx, &sim.eventBus, sim.st(), "MeterValues", request)
 	return err
 }
 
@@ -234,7 +342,7 @@ func (sim *v201Simulator) SendStatusNotification(ctx context.Context, req Status
 		EVSEID:          req.EVSEID,
 		ConnectorID:     req.ConnectorID,
 	}
-	_, err := callAndEmit[v201.StatusNotificationRequest, v201.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "StatusNotification", request)
+	_, err := callAndEmit[v201.StatusNotificationRequest, v201.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "StatusNotification", request)
 	return err
 }
 
@@ -244,7 +352,7 @@ func (sim *v201Simulator) SendFirmwareStatusNotification(ctx context.Context, st
 		requestID := int(id)
 		request.RequestID = &requestID
 	}
-	_, err := callAndEmit[v201.FirmwareStatusNotificationRequest, v201.FirmwareStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "FirmwareStatusNotification", request)
+	_, err := callAndEmit[v201.FirmwareStatusNotificationRequest, v201.FirmwareStatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "FirmwareStatusNotification", request)
 	return err
 }
 
@@ -257,7 +365,7 @@ func (sim *v201Simulator) SendDiagnosticsStatusNotification(ctx context.Context,
 		requestID := int(id)
 		request.RequestID = &requestID
 	}
-	_, err := callAndEmit[v201.LogStatusNotificationRequest, v201.LogStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "LogStatusNotification", request)
+	_, err := callAndEmit[v201.LogStatusNotificationRequest, v201.LogStatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "LogStatusNotification", request)
 	return err
 }
 
@@ -269,7 +377,7 @@ func (sim *v201Simulator) SendDataTransfer(ctx context.Context, vendorID, messag
 	if data != "" {
 		request.Data = json.RawMessage(data)
 	}
-	confirmation, err := callAndEmit[v201.DataTransferRequest, v201.DataTransferConfirmation](ctx, &sim.eventBus, sim.station, "DataTransfer", request)
+	confirmation, err := callAndEmit[v201.DataTransferRequest, v201.DataTransferConfirmation](ctx, &sim.eventBus, sim.st(), "DataTransfer", request)
 	if err != nil {
 		return DataTransferResult{}, err
 	}

@@ -49,6 +49,7 @@ export const api = {
     post<DataTransferHandlerRow>(`/${id}/data-transfer-handlers`, body),
   deleteDataTransferHandler: (id: string, handlerId: number) =>
     request<void>(`/${id}/data-transfer-handlers/${handlerId}`, { method: 'DELETE' }),
+  getConfig: (id: string) => request<Record<string, string>>(`/${id}/config`),
 }
 
 export { ApiError }

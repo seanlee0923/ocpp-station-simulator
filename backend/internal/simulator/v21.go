@@ -3,6 +3,7 @@ package simulator
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,16 +16,35 @@ import (
 type v21Simulator struct {
 	eventBus
 	dataTransferMatcher
-	station *station.Station
+	configStore configStore
 	// See v201Simulator's identical fields for why these exist.
 	lastFirmwareRequestID atomic.Int64
 	lastLogRequestID      atomic.Int64
+
+	mu         sync.Mutex
+	cfg        StationConfig
+	runCtx     context.Context
+	stationPtr atomic.Pointer[station.Station]
 }
 
 func newV21Simulator(cfg StationConfig) (Simulator, error) {
-	sim := &v21Simulator{eventBus: newEventBus(), dataTransferMatcher: newDataTransferMatcher()}
+	sim := &v21Simulator{eventBus: newEventBus(), dataTransferMatcher: newDataTransferMatcher(), configStore: newConfigStore(), cfg: cfg}
 	sim.lastFirmwareRequestID.Store(-1)
 	sim.lastLogRequestID.Store(-1)
+	st, err := sim.buildStation()
+	if err != nil {
+		return nil, err
+	}
+	sim.stationPtr.Store(st)
+	return sim, nil
+}
+
+// buildStation mirrors v16Simulator.buildStation — see its doc comment.
+func (sim *v21Simulator) buildStation() (*station.Station, error) {
+	sim.mu.Lock()
+	cfg := sim.cfg
+	sim.mu.Unlock()
+
 	st, err := station.New(station.Config{
 		URL:             cfg.CSMSURL,
 		Identity:        cfg.Identity,
@@ -38,37 +58,59 @@ func newV21Simulator(cfg StationConfig) (Simulator, error) {
 	if err != nil {
 		return nil, err
 	}
-	sim.station = st
-
-	if err := station.Handle(st, sim.handleRequestStart); err != nil {
-		return nil, err
+	handlers := []func() error{
+		func() error { return station.Handle(st, sim.handleRequestStart) },
+		func() error { return station.Handle(st, sim.handleRequestStop) },
+		func() error { return station.Handle(st, sim.handleReset) },
+		func() error { return station.Handle(st, sim.handleUpdateFirmware) },
+		func() error { return station.Handle(st, sim.handleGetLog) },
+		func() error { return station.Handle(st, sim.handleDataTransfer) },
+		func() error { return station.Handle(st, sim.handleSetVariables) },
+		func() error { return station.Handle(st, sim.handleGetVariables) },
 	}
-	if err := station.Handle(st, sim.handleRequestStop); err != nil {
-		return nil, err
+	for _, register := range handlers {
+		if err := register(); err != nil {
+			return nil, err
+		}
 	}
-	if err := station.Handle(st, sim.handleReset); err != nil {
-		return nil, err
-	}
-	if err := station.Handle(st, sim.handleUpdateFirmware); err != nil {
-		return nil, err
-	}
-	if err := station.Handle(st, sim.handleGetLog); err != nil {
-		return nil, err
-	}
-	if err := station.Handle(st, sim.handleDataTransfer); err != nil {
-		return nil, err
-	}
-	return sim, nil
+	return st, nil
 }
 
+func (sim *v21Simulator) st() *station.Station { return sim.stationPtr.Load() }
+
 func (sim *v21Simulator) Connect(ctx context.Context) error {
-	go func() { _ = sim.station.Run(ctx) }()
+	sim.mu.Lock()
+	sim.runCtx = ctx
+	sim.mu.Unlock()
+	go func() { _ = sim.st().Run(ctx) }()
 	return nil
 }
 
-func (sim *v21Simulator) Disconnect() { sim.station.Stop() }
+func (sim *v21Simulator) Disconnect() { sim.st().Stop() }
 
-func (sim *v21Simulator) State() station.ConnectionState { return sim.station.State() }
+func (sim *v21Simulator) State() station.ConnectionState { return sim.st().State() }
+
+// rotateBasicAuthPassword mirrors v16Simulator.rotateBasicAuthPassword —
+// see its doc comment.
+func (sim *v21Simulator) rotateBasicAuthPassword(newPassword string) {
+	sim.mu.Lock()
+	sim.cfg.BasicAuthPass = newPassword
+	ctx := sim.runCtx
+	sim.mu.Unlock()
+	if ctx == nil {
+		return
+	}
+
+	newStation, err := sim.buildStation()
+	if err != nil {
+		sim.emitMessage(EventMessageReceived, "SetVariables", "error", map[string]string{"error": "failed to rebuild connection: " + err.Error()})
+		return
+	}
+	if old := sim.stationPtr.Swap(newStation); old != nil {
+		old.Stop()
+	}
+	go func() { _ = newStation.Run(ctx) }()
+}
 
 func (sim *v21Simulator) handleRequestStart(_ context.Context, req v21.RequestStartTransactionRequest) (v21.RequestStartTransactionConfirmation, error) {
 	sim.emitRemoteCommand("RequestStartTransaction", req)
@@ -125,6 +167,66 @@ func (sim *v21Simulator) UnregisterDataTransferResponse(vendorID, messageID stri
 	sim.unregister(vendorID, messageID)
 }
 
+// handleSetVariables mirrors v201Simulator.handleSetVariables — see its doc
+// comment.
+func (sim *v21Simulator) handleSetVariables(_ context.Context, req v21.SetVariablesRequest) (v21.SetVariablesConfirmation, error) {
+	sim.emitRemoteCommand("SetVariables", req)
+	results := make([]v21.SetVariablesConfirmationSetVariableResult, 0, len(req.SetVariableData))
+	for _, item := range req.SetVariableData {
+		componentInstance, variableInstance := "", ""
+		if item.Component.Instance != nil {
+			componentInstance = *item.Component.Instance
+		}
+		if item.Variable.Instance != nil {
+			variableInstance = *item.Variable.Instance
+		}
+		sim.configStore.set(variableKey(item.Component.Name, componentInstance, item.Variable.Name, variableInstance), item.AttributeValue)
+		if item.Component.Name == "SecurityCtrlr" && item.Variable.Name == "BasicAuthPassword" {
+			go sim.rotateBasicAuthPassword(item.AttributeValue)
+		}
+		results = append(results, v21.SetVariablesConfirmationSetVariableResult{
+			AttributeStatus: v21.SetVariablesConfirmationSetVariableStatusEnumAccepted,
+			Component:       v21.SetVariablesConfirmationComponent{Name: item.Component.Name, Instance: item.Component.Instance},
+			Variable:        v21.SetVariablesConfirmationVariable{Name: item.Variable.Name, Instance: item.Variable.Instance},
+		})
+	}
+	return v21.SetVariablesConfirmation{SetVariableResult: results}, nil
+}
+
+// handleGetVariables mirrors v201Simulator.handleGetVariables — see its doc
+// comment for why BasicAuthPassword's value is never disclosed.
+func (sim *v21Simulator) handleGetVariables(_ context.Context, req v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {
+	sim.emitRemoteCommand("GetVariables", req)
+	results := make([]v21.GetVariablesConfirmationGetVariableResult, 0, len(req.GetVariableData))
+	for _, item := range req.GetVariableData {
+		componentInstance, variableInstance := "", ""
+		if item.Component.Instance != nil {
+			componentInstance = *item.Component.Instance
+		}
+		if item.Variable.Instance != nil {
+			variableInstance = *item.Variable.Instance
+		}
+		result := v21.GetVariablesConfirmationGetVariableResult{
+			Component: v21.GetVariablesConfirmationComponent{Name: item.Component.Name, Instance: item.Component.Instance},
+			Variable:  v21.GetVariablesConfirmationVariable{Name: item.Variable.Name, Instance: item.Variable.Instance},
+		}
+		value, ok := sim.configStore.get(variableKey(item.Component.Name, componentInstance, item.Variable.Name, variableInstance))
+		switch {
+		case !ok:
+			result.AttributeStatus = v21.GetVariablesConfirmationGetVariableStatusEnumUnknownVariable
+		case item.Component.Name == "SecurityCtrlr" && item.Variable.Name == "BasicAuthPassword":
+			result.AttributeStatus = v21.GetVariablesConfirmationGetVariableStatusEnumAccepted
+		default:
+			result.AttributeStatus = v21.GetVariablesConfirmationGetVariableStatusEnumAccepted
+			result.AttributeValue = &value
+		}
+		results = append(results, result)
+	}
+	return v21.GetVariablesConfirmation{GetVariableResult: results}, nil
+}
+
+func (sim *v21Simulator) GetConfigValues() map[string]string { return sim.configStore.all() }
+
 func (sim *v21Simulator) SendBootNotification(ctx context.Context, fields BootFields) (BootResult, error) {
 	var serial *string
 	if fields.SerialNumber != "" {
@@ -143,7 +245,7 @@ func (sim *v21Simulator) SendBootNotification(ctx context.Context, fields BootFi
 		},
 		Reason: v21.BootNotificationRequestBootReasonEnumPowerUp,
 	}
-	confirmation, err := callAndEmit[v21.BootNotificationRequest, v21.BootNotificationConfirmation](ctx, &sim.eventBus, sim.station, "BootNotification", req)
+	confirmation, err := callAndEmit[v21.BootNotificationRequest, v21.BootNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "BootNotification", req)
 	if err != nil {
 		return BootResult{}, err
 	}
@@ -152,7 +254,7 @@ func (sim *v21Simulator) SendBootNotification(ctx context.Context, fields BootFi
 
 func (sim *v21Simulator) SendAuthorize(ctx context.Context, idTag string) (AuthorizeResult, error) {
 	req := v21.AuthorizeRequest{IDToken: v21.AuthorizeRequestIDToken{IDToken: idTag, Type: "Central"}}
-	confirmation, err := callAndEmit[v21.AuthorizeRequest, v21.AuthorizeConfirmation](ctx, &sim.eventBus, sim.station, "Authorize", req)
+	confirmation, err := callAndEmit[v21.AuthorizeRequest, v21.AuthorizeConfirmation](ctx, &sim.eventBus, sim.st(), "Authorize", req)
 	if err != nil {
 		return AuthorizeResult{}, err
 	}
@@ -177,7 +279,7 @@ func (sim *v21Simulator) StartTransaction(ctx context.Context, req StartTxReques
 		EVSE:    &v21.TransactionEventRequestEVSE{ID: req.EVSEID},
 		IDToken: &v21.TransactionEventRequestIDToken{IDToken: req.IDTag, Type: "Central"},
 	}
-	_, err := callAndEmit[v21.TransactionEventRequest, v21.TransactionEventConfirmation](ctx, &sim.eventBus, sim.station, "TransactionEvent", request)
+	_, err := callAndEmit[v21.TransactionEventRequest, v21.TransactionEventConfirmation](ctx, &sim.eventBus, sim.st(), "TransactionEvent", request)
 	if err != nil {
 		return StartTxResult{}, err
 	}
@@ -196,7 +298,7 @@ func (sim *v21Simulator) StopTransaction(ctx context.Context, req StopTxRequest)
 			StoppedReason: stoppedReason,
 		},
 	}
-	_, err := callAndEmit[v21.TransactionEventRequest, v21.TransactionEventConfirmation](ctx, &sim.eventBus, sim.station, "TransactionEvent", request)
+	_, err := callAndEmit[v21.TransactionEventRequest, v21.TransactionEventConfirmation](ctx, &sim.eventBus, sim.st(), "TransactionEvent", request)
 	return err
 }
 
@@ -217,7 +319,7 @@ func (sim *v21Simulator) SendMeterValues(ctx context.Context, req MeterValuesReq
 			SampledValue: samples,
 		}},
 	}
-	_, err := callAndEmit[v21.MeterValuesRequest, v21.MeterValuesConfirmation](ctx, &sim.eventBus, sim.station, "MeterValues", request)
+	_, err := callAndEmit[v21.MeterValuesRequest, v21.MeterValuesConfirmation](ctx, &sim.eventBus, sim.st(), "MeterValues", request)
 	return err
 }
 
@@ -228,7 +330,7 @@ func (sim *v21Simulator) SendStatusNotification(ctx context.Context, req StatusR
 		EVSEID:          req.EVSEID,
 		ConnectorID:     req.ConnectorID,
 	}
-	_, err := callAndEmit[v21.StatusNotificationRequest, v21.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "StatusNotification", request)
+	_, err := callAndEmit[v21.StatusNotificationRequest, v21.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "StatusNotification", request)
 	return err
 }
 
@@ -238,7 +340,7 @@ func (sim *v21Simulator) SendFirmwareStatusNotification(ctx context.Context, sta
 		requestID := int(id)
 		request.RequestID = &requestID
 	}
-	_, err := callAndEmit[v21.FirmwareStatusNotificationRequest, v21.FirmwareStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "FirmwareStatusNotification", request)
+	_, err := callAndEmit[v21.FirmwareStatusNotificationRequest, v21.FirmwareStatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "FirmwareStatusNotification", request)
 	return err
 }
 
@@ -251,7 +353,7 @@ func (sim *v21Simulator) SendDiagnosticsStatusNotification(ctx context.Context, 
 		requestID := int(id)
 		request.RequestID = &requestID
 	}
-	_, err := callAndEmit[v21.LogStatusNotificationRequest, v21.LogStatusNotificationConfirmation](ctx, &sim.eventBus, sim.station, "LogStatusNotification", request)
+	_, err := callAndEmit[v21.LogStatusNotificationRequest, v21.LogStatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "LogStatusNotification", request)
 	return err
 }
 
@@ -263,7 +365,7 @@ func (sim *v21Simulator) SendDataTransfer(ctx context.Context, vendorID, message
 	if data != "" {
 		request.Data = json.RawMessage(data)
 	}
-	confirmation, err := callAndEmit[v21.DataTransferRequest, v21.DataTransferConfirmation](ctx, &sim.eventBus, sim.station, "DataTransfer", request)
+	confirmation, err := callAndEmit[v21.DataTransferRequest, v21.DataTransferConfirmation](ctx, &sim.eventBus, sim.st(), "DataTransfer", request)
 	if err != nil {
 		return DataTransferResult{}, err
 	}
