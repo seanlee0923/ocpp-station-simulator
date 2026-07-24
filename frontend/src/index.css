@@ -121,6 +121,16 @@ input, select {
 }
 
 /* --- station list --- */
+.server-groups { display: flex; flex-direction: column; gap: 20px; }
+.server-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.server-group-header code { font-size: 13px; color: var(--text-h); }
 .station-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
