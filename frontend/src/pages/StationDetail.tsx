@@ -55,43 +55,57 @@ export function StationDetail({ stationId, onBack }: Props) {
 
   if (!station) return <p className="muted">불러오는 중...</p>
 
+  const isDeleted = !!station.deletedAt
+
   return (
     <div>
       <div className="page-header">
         <button onClick={onBack}>&larr; 목록으로</button>
         <h1>{station.identity}</h1>
-        <span className={`state-badge state-${station.state}`}>{station.state}</span>
+        {isDeleted ? (
+          <span className="state-badge state-disconnected">삭제됨</span>
+        ) : (
+          <span className={`state-badge state-${station.state}`}>{station.state}</span>
+        )}
       </div>
       <p className="muted small">
         {station.csmsUrl} · OCPP {station.version} · 생성자 {station.createdBy}
         {station.insecureSkipTlsVerify && ' · TLS 검증 안 함'}
       </p>
 
-      <div className="row">
-        <button disabled={!!busy} onClick={() => run('connect', () => api.connect(stationId))}>
-          연결
-        </button>
-        <button disabled={!!busy} onClick={() => run('disconnect', () => api.disconnect(stationId))}>
-          연결 해제
-        </button>
-        <input value={vendorName} onChange={(event) => setVendorName(event.target.value)} placeholder="Vendor" />
-        <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Model" />
-        <button
-          disabled={!!busy}
-          onClick={() => run('boot', async () => {
-            await api.bootNotification(stationId, { vendorName, model })
-          })}
-        >
-          BootNotification 전송
-        </button>
-      </div>
-      {error && <p className="error">{error}</p>}
+      {isDeleted ? (
+        <p className="muted">
+          삭제된 충전소입니다 (읽기 전용) — 아래 이력만 조회할 수 있고 더 이상 조작할 수 없습니다.
+        </p>
+      ) : (
+        <>
+          <div className="row">
+            <button disabled={!!busy} onClick={() => run('connect', () => api.connect(stationId))}>
+              연결
+            </button>
+            <button disabled={!!busy} onClick={() => run('disconnect', () => api.disconnect(stationId))}>
+              연결 해제
+            </button>
+            <input value={vendorName} onChange={(event) => setVendorName(event.target.value)} placeholder="Vendor" />
+            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Model" />
+            <button
+              disabled={!!busy}
+              onClick={() => run('boot', async () => {
+                await api.bootNotification(stationId, { vendorName, model })
+              })}
+            >
+              BootNotification 전송
+            </button>
+          </div>
+          {error && <p className="error">{error}</p>}
 
-      <div className="connector-grid">
-        {Array.from({ length: station.connectorCount }, (_, index) => index + 1).map((number) => (
-          <ConnectorPanel key={number} stationId={stationId} connectorNumber={number} version={station.version} />
-        ))}
-      </div>
+          <div className="connector-grid">
+            {Array.from({ length: station.connectorCount }, (_, index) => index + 1).map((number) => (
+              <ConnectorPanel key={number} stationId={stationId} connectorNumber={number} version={station.version} />
+            ))}
+          </div>
+        </>
+      )}
 
       <EventLog entries={combinedLog} connected={connected} />
     </div>

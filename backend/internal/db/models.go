@@ -2,7 +2,11 @@
 // SQLite (default, zero-config) and MySQL (Config.DBDriver=mysql) backends.
 package db
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // Station is a virtual charging station's configuration. It is the source of
 // truth for what exists; internal/simulator's registry is the runtime
@@ -19,7 +23,12 @@ type Station struct {
 	LastKnownStatus       string `gorm:"type:varchar(32)"`
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
-	DeletedAt             *time.Time `gorm:"index"`
+	// DeletedAt must be exactly gorm.DeletedAt (not *time.Time) — that's the
+	// specific type GORM recognizes for soft delete. With a plain *time.Time
+	// here, Delete() silently performed a real DELETE instead, which is
+	// exactly the bug this fixes: a deleted station's row (and the ability
+	// to look up its still-intact StationEvent history) was gone for good.
+	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
 
 // User is an account an admin created. There is no self-signup: accounts

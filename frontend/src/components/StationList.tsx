@@ -21,24 +21,30 @@ export function StationList({ stations, onSelect, onDelete }: Props) {
   return (
     <div className="station-grid">
       {stations.map((station) => (
-        <div key={station.id} className="station-card" onClick={() => onSelect(station.id)}>
+        <div key={station.id} className={`station-card${station.deletedAt ? ' station-card-deleted' : ''}`} onClick={() => onSelect(station.id)}>
           <div className="station-card-header">
             <strong>{station.identity}</strong>
-            <span className={`state-badge state-${station.state}`}>{STATE_LABEL[station.state] ?? station.state}</span>
+            {station.deletedAt ? (
+              <span className="state-badge state-disconnected">삭제됨</span>
+            ) : (
+              <span className={`state-badge state-${station.state}`}>{STATE_LABEL[station.state] ?? station.state}</span>
+            )}
           </div>
           <div className="muted small">{station.csmsUrl}</div>
           <div className="muted small">
             OCPP {station.version} · 커넥터 {station.connectorCount}개 · 생성자 {station.createdBy}
           </div>
-          <button
-            className="danger small-btn"
-            onClick={(event) => {
-              event.stopPropagation()
-              if (window.confirm(`${station.identity} 을(를) 삭제할까요?`)) onDelete(station.id)
-            }}
-          >
-            삭제
-          </button>
+          {!station.deletedAt && (
+            <button
+              className="danger small-btn"
+              onClick={(event) => {
+                event.stopPropagation()
+                if (window.confirm(`${station.identity} 을(를) 삭제할까요?`)) onDelete(station.id)
+              }}
+            >
+              삭제
+            </button>
+          )}
         </div>
       ))}
     </div>

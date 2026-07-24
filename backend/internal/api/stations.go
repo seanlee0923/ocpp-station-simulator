@@ -52,8 +52,16 @@ func (app *App) createStation(c *gin.Context) {
 }
 
 func (app *App) listStations(c *gin.Context) {
+	query := app.DB.Order("created_at desc")
+	if c.Query("includeDeleted") == "true" {
+		// A deleted station's own StationEvent history is never deleted
+		// (see plan) — Unscoped is what makes it possible to still find and
+		// browse to that history, instead of the row (and any path to its
+		// history) just vanishing from the list forever.
+		query = query.Unscoped()
+	}
 	var rows []db.Station
-	if err := app.DB.Order("created_at desc").Find(&rows).Error; err != nil {
+	if err := query.Find(&rows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -211,9 +219,13 @@ func (app *App) listEvents(c *gin.Context) {
 
 // --- shared helpers ---
 
+// mustFindStation always looks up Unscoped (soft-deleted stations included):
+// if a caller already has the exact ID — from the "deleted" list, a bookmark,
+// a shared link — its details and history must stay reachable, only the
+// active-station list itself hides deleted rows.
 func (app *App) mustFindStation(c *gin.Context) (db.Station, bool) {
 	var row db.Station
-	err := app.DB.First(&row, "id = ?", c.Param("id")).Error
+	err := app.DB.Unscoped().First(&row, "id = ?", c.Param("id")).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "station not found"})
 		return db.Station{}, false

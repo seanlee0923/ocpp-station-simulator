@@ -12,6 +12,7 @@ export interface Station {
   createdAt: string
   lastKnownStatus: string
   state: string
+  deletedAt?: string
 }
 
 export interface CreateStationInput {

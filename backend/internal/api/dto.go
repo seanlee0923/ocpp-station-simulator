@@ -19,26 +19,31 @@ type createStationRequest struct {
 }
 
 type stationResponse struct {
-	ID                    string    `json:"id"`
-	Identity              string    `json:"identity"`
-	CSMSURL               string    `json:"csmsUrl"`
-	Version               string    `json:"version"`
-	ConnectorCount        int       `json:"connectorCount"`
-	BasicAuthUser         string    `json:"basicAuthUser,omitempty"`
-	InsecureSkipTLSVerify bool      `json:"insecureSkipTlsVerify"`
-	CreatedBy             string    `json:"createdBy"`
-	CreatedAt             time.Time `json:"createdAt"`
-	LastKnownStatus       string    `json:"lastKnownStatus"`
-	State                 string    `json:"state"` // live station.ConnectionState, "unknown" if not currently running
+	ID                    string     `json:"id"`
+	Identity              string     `json:"identity"`
+	CSMSURL               string     `json:"csmsUrl"`
+	Version               string     `json:"version"`
+	ConnectorCount        int        `json:"connectorCount"`
+	BasicAuthUser         string     `json:"basicAuthUser,omitempty"`
+	InsecureSkipTLSVerify bool       `json:"insecureSkipTlsVerify"`
+	CreatedBy             string     `json:"createdBy"`
+	CreatedAt             time.Time  `json:"createdAt"`
+	LastKnownStatus       string     `json:"lastKnownStatus"`
+	State                 string     `json:"state"` // live station.ConnectionState, "unknown" if not currently running
+	DeletedAt             *time.Time `json:"deletedAt,omitempty"`
 }
 
 func toStationResponse(row db.Station, state string) stationResponse {
-	return stationResponse{
+	response := stationResponse{
 		ID: row.ID, Identity: row.Identity, CSMSURL: row.CSMSURL, Version: row.Version,
 		ConnectorCount: row.ConnectorCount, BasicAuthUser: row.BasicAuthUser,
 		InsecureSkipTLSVerify: row.InsecureSkipTLSVerify, CreatedBy: row.CreatedBy,
 		CreatedAt: row.CreatedAt, LastKnownStatus: row.LastKnownStatus, State: state,
 	}
+	if row.DeletedAt.Valid {
+		response.DeletedAt = &row.DeletedAt.Time
+	}
+	return response
 }
 
 type wsEvent struct {

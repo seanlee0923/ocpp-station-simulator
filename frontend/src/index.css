@@ -137,6 +137,7 @@ input, select {
   gap: 4px;
 }
 .station-card:hover { border-color: var(--accent); }
+.station-card-deleted { opacity: 0.6; }
 .station-card-header {
   display: flex;
   justify-content: space-between;

@@ -9,7 +9,7 @@ const post = <T>(path: string, body?: unknown) =>
   request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined })
 
 export const api = {
-  listStations: () => request<Station[]>(''),
+  listStations: (includeDeleted = false) => request<Station[]>(includeDeleted ? '?includeDeleted=true' : ''),
   getStation: (id: string) => request<Station>(`/${id}`),
   createStation: (input: CreateStationInput) => post<Station>('', input),
   deleteStation: (id: string) => request<void>(`/${id}`, { method: 'DELETE' }),
