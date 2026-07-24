@@ -1,0 +1,18 @@
+# Go
+/backend/internal/webui/dist/*
+!/backend/internal/webui/dist/index.html
+/ocpp-station-simulator
+*.test
+
+# SQLite default data
+/data/
+*.db
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
