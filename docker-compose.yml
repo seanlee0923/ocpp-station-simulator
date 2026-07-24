@@ -1,0 +1,19 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # 비워두면 컨테이너가 임시 admin 계정을 생성해 로그에 비밀번호를 출력한다.
+      # 사내 배포에서는 반드시 지정할 것.
+      ADMIN_USER: ${ADMIN_USER:-}
+      ADMIN_PASS: ${ADMIN_PASS:-}
+      # 기본은 컨테이너 내 SQLite(아래 볼륨에 저장). 사내 MySQL을 쓰려면
+      # DB_DRIVER=mysql, DB_DSN=user:pass@tcp(host:3306)/dbname?parseTime=true
+      DB_DRIVER: ${DB_DRIVER:-sqlite}
+      DB_DSN: ${DB_DSN:-/data/ocpp-simulator.db}
+    volumes:
+      - ocpp-data:/data
+
+volumes:
+  ocpp-data:
