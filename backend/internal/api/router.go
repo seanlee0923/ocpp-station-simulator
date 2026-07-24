@@ -18,24 +18,42 @@ func RegisterRoutes(router *gin.Engine, app *App) {
 
 	group := router.Group("/api/stations", app.requireAuth)
 	group.POST("", app.createStation)
+	// listStations filters by access itself (admin sees everything, everyone
+	// else sees only what they've been granted) rather than rejecting —
+	// there's no single station ID here for requireStationAccess to check.
 	group.GET("", app.listStations)
-	group.GET("/:id", app.getStation)
-	group.DELETE("/:id", app.deleteStation)
-	group.POST("/:id/connect", app.connectStation)
-	group.POST("/:id/disconnect", app.disconnectStation)
-	group.POST("/:id/boot-notification", app.sendBootNotification)
-	group.POST("/:id/authorize", app.sendAuthorize)
-	group.POST("/:id/meter-values", app.sendMeterValues)
-	group.POST("/:id/status-notification", app.sendStatusNotification)
-	group.POST("/:id/firmware-status-notification", app.sendFirmwareStatusNotification)
-	group.POST("/:id/diagnostics-status-notification", app.sendDiagnosticsStatusNotification)
-	group.POST("/:id/data-transfer", app.sendDataTransfer)
-	group.GET("/:id/data-transfer-handlers", app.listDataTransferHandlers)
-	group.POST("/:id/data-transfer-handlers", app.createDataTransferHandler)
-	group.DELETE("/:id/data-transfer-handlers/:handlerId", app.deleteDataTransferHandler)
-	group.POST("/:id/transactions/start", app.startTransaction)
-	group.POST("/:id/transactions/:txId/stop", app.stopTransaction)
-	group.GET("/:id/config", app.getStationConfig)
-	group.GET("/:id/events", app.listEvents)
-	group.GET("/:id/ws", app.streamEvents)
+
+	// Every route below operates on one specific station, so
+	// requireStationAccess (admin bypass, else must have a db.StationAccess
+	// grant, else 404) applies to all of them in one place instead of each
+	// handler checking it individually.
+	scoped := group.Group("/:id", app.requireStationAccess)
+	scoped.GET("", app.getStation)
+	scoped.DELETE("", app.deleteStation)
+	scoped.POST("/connect", app.connectStation)
+	scoped.POST("/disconnect", app.disconnectStation)
+	scoped.POST("/boot-notification", app.sendBootNotification)
+	scoped.POST("/authorize", app.sendAuthorize)
+	scoped.POST("/meter-values", app.sendMeterValues)
+	scoped.POST("/status-notification", app.sendStatusNotification)
+	scoped.POST("/firmware-status-notification", app.sendFirmwareStatusNotification)
+	scoped.POST("/diagnostics-status-notification", app.sendDiagnosticsStatusNotification)
+	scoped.POST("/data-transfer", app.sendDataTransfer)
+	scoped.GET("/data-transfer-handlers", app.listDataTransferHandlers)
+	scoped.POST("/data-transfer-handlers", app.createDataTransferHandler)
+	scoped.DELETE("/data-transfer-handlers/:handlerId", app.deleteDataTransferHandler)
+	scoped.POST("/transactions/start", app.startTransaction)
+	scoped.POST("/transactions/:txId/stop", app.stopTransaction)
+	scoped.GET("/config", app.getStationConfig)
+	scoped.GET("/events", app.listEvents)
+	scoped.GET("/ws", app.streamEvents)
+
+	// Access-grant management is additionally admin-only (see plan: no
+	// delegated sharing) — still nested under scoped so a non-admin with no
+	// grant gets the same 404 as everywhere else, not a 403 that would leak
+	// whether the station exists.
+	accessScoped := scoped.Group("/access", app.requireAdmin)
+	accessScoped.GET("", app.listStationAccess)
+	accessScoped.POST("", app.grantStationAccess)
+	accessScoped.DELETE("/:username", app.revokeStationAccess)
 }

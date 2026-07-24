@@ -46,19 +46,34 @@ func (app *App) createStation(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// The creator always gets access to their own station — without this a
+	// non-admin user would be immediately locked out of what they just made.
+	if err := app.DB.Create(&db.StationAccess{StationID: id, Username: actor, GrantedBy: actor}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	app.Writer.enqueue(db.StationEvent{StationID: id, Actor: actor, EventType: "created"})
 
 	c.JSON(http.StatusCreated, toStationResponse(row, "connecting"))
 }
 
 func (app *App) listStations(c *gin.Context) {
-	query := app.DB.Order("created_at desc")
+	// Qualified as stations.created_at: once the non-admin branch below joins
+	// in station_accesses (which also has its own created_at column), an
+	// unqualified ORDER BY is ambiguous and SQLite rejects the query outright.
+	query := app.DB.Order("stations.created_at desc")
 	if c.Query("includeDeleted") == "true" {
 		// A deleted station's own StationEvent history is never deleted
 		// (see plan) — Unscoped is what makes it possible to still find and
 		// browse to that history, instead of the row (and any path to its
 		// history) just vanishing from the list forever.
 		query = query.Unscoped()
+	}
+	if !isAdminFrom(c) {
+		// Non-admins only ever see stations they've been granted access to
+		// (see db.StationAccess) — admins see everything unfiltered.
+		query = query.Joins("JOIN station_accesses ON station_accesses.station_id = stations.id").
+			Where("station_accesses.username = ?", actorFrom(c))
 	}
 	var rows []db.Station
 	if err := query.Find(&rows).Error; err != nil {

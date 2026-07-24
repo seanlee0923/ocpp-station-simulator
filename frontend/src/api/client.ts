@@ -1,7 +1,7 @@
 import { apiFetch, ApiError } from './http'
 import type {
   BootFields, BootResult, AuthorizeResult, CreateStationInput, DataTransferHandlerRow, MeterValuesInput,
-  Station, StartTxInput, StartTxResult, StationEventRow, StatusInput, StopTxInput,
+  Station, StartTxInput, StartTxResult, StationAccessRow, StationEventRow, StatusInput, StopTxInput,
 } from '../types/station'
 
 export interface SendDataTransferInput {
@@ -50,6 +50,10 @@ export const api = {
   deleteDataTransferHandler: (id: string, handlerId: number) =>
     request<void>(`/${id}/data-transfer-handlers/${handlerId}`, { method: 'DELETE' }),
   getConfig: (id: string) => request<Record<string, string>>(`/${id}/config`),
+  listStationAccess: (id: string) => request<StationAccessRow[]>(`/${id}/access`),
+  grantStationAccess: (id: string, username: string) => post<StationAccessRow>(`/${id}/access`, { username }),
+  revokeStationAccess: (id: string, username: string) =>
+    request<void>(`/${id}/access/${encodeURIComponent(username)}`, { method: 'DELETE' }),
 }
 
 export { ApiError }

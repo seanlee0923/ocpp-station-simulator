@@ -6,8 +6,10 @@ import { ConnectorPanel } from '../components/ConnectorPanel'
 import { MaintenancePanel } from '../components/MaintenancePanel'
 import { DataTransferPanel } from '../components/DataTransferPanel'
 import { ConfigPanel } from '../components/ConfigPanel'
+import { AccessPanel } from '../components/AccessPanel'
 import { EventLog } from '../components/EventLog'
 import { useToast } from '../state/ToastContext'
+import { useAuth } from '../state/AuthContext'
 
 interface Props {
   stationId: string
@@ -23,6 +25,7 @@ function historyToWsEvent(row: StationEventRow): WsEvent {
 
 export function StationDetail({ stationId, onBack }: Props) {
   const { showToast } = useToast()
+  const { me } = useAuth()
   const [station, setStation] = useState<Station | null>(null)
   const [history, setHistory] = useState<StationEventRow[]>([])
   const [vendorName, setVendorName] = useState('Acme')
@@ -114,6 +117,7 @@ export function StationDetail({ stationId, onBack }: Props) {
             <MaintenancePanel stationId={stationId} version={station.version} />
             <DataTransferPanel stationId={stationId} />
             <ConfigPanel stationId={stationId} />
+            {me?.isAdmin && <AccessPanel stationId={stationId} />}
           </div>
         </>
       )}

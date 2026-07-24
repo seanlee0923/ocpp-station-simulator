@@ -51,6 +51,19 @@ type User struct {
 	CreatedAt    time.Time
 }
 
+// StationAccess grants a non-admin user access to one station. Keyed by
+// Username (a plain string), not User.ID — matching how CreatedBy/Actor are
+// already handled everywhere else in this codebase (Station.CreatedBy,
+// StationEvent.Actor), so this doesn't need a join to the users table.
+// Admins bypass this table entirely (see requireStationAccess).
+type StationAccess struct {
+	ID        uint64 `gorm:"primaryKey;autoIncrement"`
+	StationID string `gorm:"type:varchar(64);uniqueIndex:idx_station_user"`
+	Username  string `gorm:"type:varchar(255);uniqueIndex:idx_station_user"`
+	GrantedBy string `gorm:"type:varchar(255)"`
+	CreatedAt time.Time
+}
+
 // DataTransferHandler is an operator-registered canned response for an
 // inbound DataTransfer.req matching VendorID (and, if set, MessageID — an
 // empty MessageID matches any messageId for that vendorId). It exists

@@ -101,6 +101,12 @@ export interface DataTransferHandlerRow {
 
 export const DATA_TRANSFER_STATUS_VALUES = ['Accepted', 'Rejected', 'UnknownMessageId', 'UnknownVendorId']
 
+export interface StationAccessRow {
+  username: string
+  grantedBy: string
+  createdAt: string
+}
+
 export interface WsEvent {
   stationId: string
   type: string

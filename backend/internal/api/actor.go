@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ocpp-station-simulator/backend/internal/auth"
+	"ocpp-station-simulator/backend/internal/db"
 )
 
 const actorContextKey = "actor"
@@ -38,6 +39,31 @@ func (app *App) requireAdmin(c *gin.Context) {
 	isAdmin, _ := c.Get(isAdminContextKey)
 	if admin, ok := isAdmin.(bool); !ok || !admin {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+		return
+	}
+	c.Next()
+}
+
+// requireStationAccess must run after requireAuth (see router.go's :id
+// subgroup). Admins bypass the StationAccess table entirely. Everyone else
+// must have an explicit grant (see db.StationAccess) — a missing one
+// answers 404, not 403, so a station's very existence isn't confirmed to a
+// user who has no business knowing about it.
+func (app *App) requireStationAccess(c *gin.Context) {
+	if isAdminFrom(c) {
+		c.Next()
+		return
+	}
+	var count int64
+	err := app.DB.Model(&db.StationAccess{}).
+		Where("station_id = ? AND username = ?", c.Param("id"), actorFrom(c)).
+		Count(&count).Error
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if count == 0 {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "station not found"})
 		return
 	}
 	c.Next()
