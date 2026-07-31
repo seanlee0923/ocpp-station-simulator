@@ -82,11 +82,24 @@ func (sim *v16Simulator) buildStation() (*station.Station, error) {
 
 func (sim *v16Simulator) st() *station.Station { return sim.stationPtr.Load() }
 
+// Connect always runs a freshly built station.Station rather than reusing
+// the current one: station.Stop() is permanent (it closes an internal
+// channel behind a sync.Once), so a Station that has been stopped by
+// Disconnect returns ErrStopped from Run without ever dialing. Swapping in
+// a new instance also means a second Connect without an intervening
+// Disconnect can't leave two Run loops racing over the same identity.
 func (sim *v16Simulator) Connect(ctx context.Context) error {
+	newStation, err := sim.buildStation()
+	if err != nil {
+		return err
+	}
 	sim.mu.Lock()
 	sim.runCtx = ctx
 	sim.mu.Unlock()
-	go func() { _ = sim.st().Run(ctx) }()
+	if old := sim.stationPtr.Swap(newStation); old != nil {
+		old.Stop()
+	}
+	go func() { _ = newStation.Run(ctx) }()
 	return nil
 }
 
@@ -108,16 +121,9 @@ func (sim *v16Simulator) rotateBasicAuthPassword(newPassword string) {
 	if ctx == nil {
 		return // never connected yet; the new password takes effect whenever Connect() first runs
 	}
-
-	newStation, err := sim.buildStation()
-	if err != nil {
+	if err := sim.Connect(ctx); err != nil {
 		sim.emitMessage(EventMessageReceived, "ChangeConfiguration", "error", map[string]string{"error": "failed to rebuild connection: " + err.Error()})
-		return
 	}
-	if old := sim.stationPtr.Swap(newStation); old != nil {
-		old.Stop()
-	}
-	go func() { _ = newStation.Run(ctx) }()
 }
 
 // handleRemoteStart, handleRemoteStop, and handleReset always answer

@@ -78,11 +78,20 @@ func (sim *v21Simulator) buildStation() (*station.Station, error) {
 
 func (sim *v21Simulator) st() *station.Station { return sim.stationPtr.Load() }
 
+// Connect mirrors v16Simulator.Connect — see its doc comment for why every
+// Connect runs a freshly built station.Station.
 func (sim *v21Simulator) Connect(ctx context.Context) error {
+	newStation, err := sim.buildStation()
+	if err != nil {
+		return err
+	}
 	sim.mu.Lock()
 	sim.runCtx = ctx
 	sim.mu.Unlock()
-	go func() { _ = sim.st().Run(ctx) }()
+	if old := sim.stationPtr.Swap(newStation); old != nil {
+		old.Stop()
+	}
+	go func() { _ = newStation.Run(ctx) }()
 	return nil
 }
 
@@ -100,16 +109,9 @@ func (sim *v21Simulator) rotateBasicAuthPassword(newPassword string) {
 	if ctx == nil {
 		return
 	}
-
-	newStation, err := sim.buildStation()
-	if err != nil {
+	if err := sim.Connect(ctx); err != nil {
 		sim.emitMessage(EventMessageReceived, "SetVariables", "error", map[string]string{"error": "failed to rebuild connection: " + err.Error()})
-		return
 	}
-	if old := sim.stationPtr.Swap(newStation); old != nil {
-		old.Stop()
-	}
-	go func() { _ = newStation.Run(ctx) }()
 }
 
 func (sim *v21Simulator) handleRequestStart(_ context.Context, req v21.RequestStartTransactionRequest) (v21.RequestStartTransactionConfirmation, error) {
