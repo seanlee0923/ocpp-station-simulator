@@ -217,7 +217,7 @@ func (app *App) stopTransaction(c *gin.Context) {
 	if !ok {
 		return
 	}
-	req := simulator.StopTxRequest{TransactionID: c.Param("txId"), MeterStop: body.MeterStop, Reason: body.Reason}
+	req := simulator.StopTxRequest{TransactionID: c.Param("txId"), MeterStop: body.MeterStop, Reason: body.Reason, Timestamp: body.Timestamp}
 	if err := managed.Sim.StopTransaction(c.Request.Context(), req); app.fail(c, err) {
 		return
 	}

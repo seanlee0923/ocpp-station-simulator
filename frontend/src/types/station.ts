@@ -47,6 +47,7 @@ export interface StartTxInput {
   evseId: number
   idTag: string
   meterStart: number
+  timestamp?: string
 }
 
 export interface StartTxResult {
@@ -56,6 +57,7 @@ export interface StartTxResult {
 export interface StopTxInput {
   meterStop: number
   reason: string
+  timestamp?: string
 }
 
 export interface MeterSample {
@@ -69,6 +71,7 @@ export interface MeterValuesInput {
   connectorId: number
   evseId: number
   samples: MeterSample[]
+  timestamp?: string
 }
 
 export interface StatusInput {
@@ -77,6 +80,7 @@ export interface StatusInput {
   status: string
   errorCode?: string
   info?: string
+  timestamp?: string
 }
 
 export interface StationEventRow {

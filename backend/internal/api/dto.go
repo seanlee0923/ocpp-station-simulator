@@ -100,6 +100,7 @@ type startTxRequest = simulator.StartTxRequest
 type stopTxRequest struct {
 	MeterStop int    `json:"meterStop"`
 	Reason    string `json:"reason"`
+	Timestamp string `json:"timestamp"`
 }
 type meterValuesRequest = simulator.MeterValuesRequest
 type statusRequest = simulator.StatusRequest

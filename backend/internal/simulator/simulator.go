@@ -157,6 +157,7 @@ type StartTxRequest struct {
 	EVSEID      int    `json:"evseId"`      // OCPP 2.0.1 / 2.1
 	IDTag       string `json:"idTag"`
 	MeterStart  int    `json:"meterStart"` // Wh; OCPP 1.6 only
+	Timestamp   string `json:"timestamp"`
 }
 
 type StartTxResult struct {
@@ -167,6 +168,7 @@ type StopTxRequest struct {
 	TransactionID string `json:"transactionId"`
 	MeterStop     int    `json:"meterStop"` // Wh; OCPP 1.6 only
 	Reason        string `json:"reason"`
+	Timestamp     string `json:"timestamp"`
 }
 
 type MeterValuesRequest struct {
@@ -174,6 +176,7 @@ type MeterValuesRequest struct {
 	ConnectorID   int           `json:"connectorId"`   // OCPP 1.6
 	EVSEID        int           `json:"evseId"`        // OCPP 2.0.1 / 2.1
 	Samples       []MeterSample `json:"samples"`
+	Timestamp     string        `json:"timestamp"`
 }
 
 type MeterSample struct {
@@ -188,6 +191,16 @@ type StatusRequest struct {
 	Status      string `json:"status"`
 	ErrorCode   string `json:"errorCode,omitempty"` // OCPP 1.6 only
 	Info        string `json:"info,omitempty"`      // OCPP 1.6 only
+	Timestamp   string `json:"timestamp"`           // OCPP 2.0.1 / 2.1 only
+}
+
+// requestTimestamp uses the caller-supplied time when present and otherwise
+// defaults to the send time. OCPP timestamps are always emitted in UTC.
+func requestTimestamp(timestamp string) string {
+	if timestamp == "" {
+		return time.Now().UTC().Format(time.RFC3339)
+	}
+	return timestamp
 }
 
 // New constructs the Simulator implementation matching cfg.Version.

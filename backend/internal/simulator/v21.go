@@ -271,7 +271,7 @@ func (sim *v21Simulator) StartTransaction(ctx context.Context, req StartTxReques
 	chargingState := v21.TransactionEventRequestChargingStateEnumCharging
 	request := v21.TransactionEventRequest{
 		EventType:     v21.TransactionEventRequestTransactionEventEnumStarted,
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Timestamp:     requestTimestamp(req.Timestamp),
 		TriggerReason: v21.TransactionEventRequestTriggerReasonEnumAuthorized,
 		SeqNo:         0,
 		TransactionInfo: v21.TransactionEventRequestTransaction{
@@ -292,7 +292,7 @@ func (sim *v21Simulator) StopTransaction(ctx context.Context, req StopTxRequest)
 	stoppedReason := stopReason21(req.Reason)
 	request := v21.TransactionEventRequest{
 		EventType:     v21.TransactionEventRequestTransactionEventEnumEnded,
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Timestamp:     requestTimestamp(req.Timestamp),
 		TriggerReason: v21.TransactionEventRequestTriggerReasonEnumStopAuthorized,
 		SeqNo:         1,
 		TransactionInfo: v21.TransactionEventRequestTransaction{
@@ -317,7 +317,7 @@ func (sim *v21Simulator) SendMeterValues(ctx context.Context, req MeterValuesReq
 	request := v21.MeterValuesRequest{
 		EVSEID: req.EVSEID,
 		MeterValue: []v21.MeterValuesRequestMeterValue{{
-			Timestamp:    time.Now().UTC().Format(time.RFC3339),
+			Timestamp:    requestTimestamp(req.Timestamp),
 			SampledValue: samples,
 		}},
 	}
@@ -327,7 +327,7 @@ func (sim *v21Simulator) SendMeterValues(ctx context.Context, req MeterValuesReq
 
 func (sim *v21Simulator) SendStatusNotification(ctx context.Context, req StatusRequest) error {
 	request := v21.StatusNotificationRequest{
-		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		Timestamp:       requestTimestamp(req.Timestamp),
 		ConnectorStatus: v21.StatusNotificationRequestConnectorStatusEnum(req.Status),
 		EVSEID:          req.EVSEID,
 		ConnectorID:     req.ConnectorID,

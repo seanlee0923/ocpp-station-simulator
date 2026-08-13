@@ -3,6 +3,14 @@ import { api } from '../api/client'
 import { MEASURAND_PRESETS, STATUS_VALUES_16, STATUS_VALUES_2X, type OcppVersion } from '../types/station'
 import { useToast } from '../state/ToastContext'
 
+const currentLocalDateTime = () => {
+  const now = new Date()
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset())
+  return now.toISOString().slice(0, 19)
+}
+
+const toTimestamp = (value: string) => value ? new Date(value).toISOString() : undefined
+
 interface Props {
   stationId: string
   connectorNumber: number
@@ -20,6 +28,7 @@ export function ConnectorPanel({ stationId, connectorNumber, version }: Props) {
   const [status, setStatus] = useState((version === '1.6' ? STATUS_VALUES_16 : STATUS_VALUES_2X)[0])
   const [measurand, setMeasurand] = useState(MEASURAND_PRESETS[0])
   const [meterValue, setMeterValue] = useState('0')
+  const [timestamp, setTimestamp] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
@@ -50,6 +59,7 @@ export function ConnectorPanel({ stationId, connectorNumber, version }: Props) {
   const start = () => run('Start Transaction', async () => {
     const result = await api.startTransaction(stationId, {
       connectorId: connectorNumber, evseId: connectorNumber, idTag, meterStart: 0,
+      timestamp: toTimestamp(timestamp),
     })
     setTransactionId(result.transactionId)
     return `트랜잭션 ${result.transactionId}`
@@ -61,18 +71,23 @@ export function ConnectorPanel({ stationId, connectorNumber, version }: Props) {
       connectorId: connectorNumber,
       evseId: connectorNumber,
       samples: [{ measurand, value: meterValue }],
+      timestamp: toTimestamp(timestamp),
     })
     return `${measurand}=${meterValue}`
   })
 
   const stop = () => run('Stop Transaction', async () => {
     if (!transactionId) return
-    await api.stopTransaction(stationId, transactionId, { meterStop: Number(meterValue) || 0, reason: 'Local' })
+    await api.stopTransaction(stationId, transactionId, {
+      meterStop: Number(meterValue) || 0, reason: 'Local', timestamp: toTimestamp(timestamp),
+    })
     setTransactionId(null)
   })
 
   const sendStatus = () => run('StatusNotification 전송', async () => {
-    await api.statusNotification(stationId, { connectorId: connectorNumber, evseId: connectorNumber, status })
+    await api.statusNotification(stationId, {
+      connectorId: connectorNumber, evseId: connectorNumber, status, timestamp: toTimestamp(timestamp),
+    })
     return status
   })
 
@@ -81,6 +96,20 @@ export function ConnectorPanel({ stationId, connectorNumber, version }: Props) {
       <div className="connector-header">
         <h3>커넥터 {connectorNumber}</h3>
         {transactionId && <span className="tx-badge">진행 중인 트랜잭션: {transactionId}</span>}
+      </div>
+
+      <div className="row">
+        <input
+          type="datetime-local"
+          step="1"
+          value={timestamp}
+          onChange={(event) => setTimestamp(event.target.value)}
+          aria-label="OCPP 타임스탬프"
+        />
+        <button type="button" disabled={!!busy} onClick={() => setTimestamp(currentLocalDateTime())}>
+          현재 시각
+        </button>
+        <span className="muted small">비워 두면 백엔드에서 전송 시각을 사용합니다.</span>
       </div>
 
       <div className="row">

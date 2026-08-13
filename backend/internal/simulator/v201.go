@@ -283,7 +283,7 @@ func (sim *v201Simulator) StartTransaction(ctx context.Context, req StartTxReque
 	chargingState := v201.TransactionEventRequestChargingStateEnumCharging
 	request := v201.TransactionEventRequest{
 		EventType:     v201.TransactionEventRequestTransactionEventEnumStarted,
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Timestamp:     requestTimestamp(req.Timestamp),
 		TriggerReason: v201.TransactionEventRequestTriggerReasonEnumAuthorized,
 		SeqNo:         0,
 		TransactionInfo: v201.TransactionEventRequestTransaction{
@@ -304,7 +304,7 @@ func (sim *v201Simulator) StopTransaction(ctx context.Context, req StopTxRequest
 	stoppedReason := stopReason201(req.Reason)
 	request := v201.TransactionEventRequest{
 		EventType:     v201.TransactionEventRequestTransactionEventEnumEnded,
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Timestamp:     requestTimestamp(req.Timestamp),
 		TriggerReason: v201.TransactionEventRequestTriggerReasonEnumStopAuthorized,
 		SeqNo:         1,
 		TransactionInfo: v201.TransactionEventRequestTransaction{
@@ -329,7 +329,7 @@ func (sim *v201Simulator) SendMeterValues(ctx context.Context, req MeterValuesRe
 	request := v201.MeterValuesRequest{
 		EVSEID: req.EVSEID,
 		MeterValue: []v201.MeterValuesRequestMeterValue{{
-			Timestamp:    time.Now().UTC().Format(time.RFC3339),
+			Timestamp:    requestTimestamp(req.Timestamp),
 			SampledValue: samples,
 		}},
 	}
@@ -339,7 +339,7 @@ func (sim *v201Simulator) SendMeterValues(ctx context.Context, req MeterValuesRe
 
 func (sim *v201Simulator) SendStatusNotification(ctx context.Context, req StatusRequest) error {
 	request := v201.StatusNotificationRequest{
-		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		Timestamp:       requestTimestamp(req.Timestamp),
 		ConnectorStatus: v201.StatusNotificationRequestConnectorStatusEnum(req.Status),
 		EVSEID:          req.EVSEID,
 		ConnectorID:     req.ConnectorID,

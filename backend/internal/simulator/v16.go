@@ -270,7 +270,7 @@ func (sim *v16Simulator) StartTransaction(ctx context.Context, req StartTxReques
 		ConnectorID: req.ConnectorID,
 		IDTag:       req.IDTag,
 		MeterStart:  req.MeterStart,
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Timestamp:   requestTimestamp(req.Timestamp),
 	}
 	confirmation, err := callAndEmit[v16.StartTransactionRequest, v16.StartTransactionConfirmation](ctx, &sim.eventBus, sim.st(), "StartTransaction", request)
 	if err != nil {
@@ -286,7 +286,7 @@ func (sim *v16Simulator) StopTransaction(ctx context.Context, req StopTxRequest)
 	}
 	request := v16.StopTransactionRequest{
 		MeterStop:     req.MeterStop,
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Timestamp:     requestTimestamp(req.Timestamp),
 		TransactionID: transactionID,
 		Reason:        stopReason16(req.Reason),
 	}
@@ -318,7 +318,7 @@ func (sim *v16Simulator) SendMeterValues(ctx context.Context, req MeterValuesReq
 		ConnectorID:   req.ConnectorID,
 		TransactionID: transactionID,
 		MeterValue: []v16.MeterValuesRequestMeterValueItem{{
-			Timestamp:    time.Now().UTC().Format(time.RFC3339),
+			Timestamp:    requestTimestamp(req.Timestamp),
 			SampledValue: samples,
 		}},
 	}
