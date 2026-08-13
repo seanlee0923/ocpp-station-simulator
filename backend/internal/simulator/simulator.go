@@ -191,7 +191,7 @@ type StatusRequest struct {
 	Status      string `json:"status"`
 	ErrorCode   string `json:"errorCode,omitempty"` // OCPP 1.6 only
 	Info        string `json:"info,omitempty"`      // OCPP 1.6 only
-	Timestamp   string `json:"timestamp"`           // OCPP 2.0.1 / 2.1 only
+	Timestamp   string `json:"timestamp"`
 }
 
 // requestTimestamp uses the caller-supplied time when present and otherwise

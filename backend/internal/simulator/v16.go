@@ -335,11 +335,13 @@ func (sim *v16Simulator) SendStatusNotification(ctx context.Context, req StatusR
 	if req.Info != "" {
 		info = &req.Info
 	}
+	timestamp := requestTimestamp(req.Timestamp)
 	request := v16.StatusNotificationRequest{
 		ConnectorID: req.ConnectorID,
 		ErrorCode:   errorCode,
 		Status:      v16.StatusNotificationRequestStatus(req.Status),
 		Info:        info,
+		Timestamp:   &timestamp,
 	}
 	_, err := callAndEmit[v16.StatusNotificationRequest, v16.StatusNotificationConfirmation](ctx, &sim.eventBus, sim.st(), "StatusNotification", request)
 	return err
