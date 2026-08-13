@@ -60,7 +60,7 @@ func (sim *v16Simulator) buildStation() (*station.Station, error) {
 		PongTimeout:     pongTimeout,
 		ReconnectPolicy: &station.ReconnectPolicy{InitialDelay: time.Second, MaxDelay: 30 * time.Second, Multiplier: 2},
 		OnConnect:       func(*station.Station) { sim.emit(Event{Type: EventConnected}) },
-		OnDisconnect:    func(*station.Station, error) { sim.emit(Event{Type: EventDisconnected}) },
+		OnDisconnect:    func(_ *station.Station, err error) { sim.emit(disconnectEvent(err)) },
 	})
 	if err != nil {
 		return nil, err

@@ -40,6 +40,23 @@ type StationConfig struct {
 	PingInterval int
 }
 
+// disconnectEvent records why the link dropped. station.Station reports the
+// cause to OnDisconnect and it used to be discarded, which left the event
+// log unable to distinguish our own PongTimeout from an i/o timeout from a
+// CSMS-initiated close — the one detail needed to tell whose side a
+// recurring disconnect is on. A nil error is a clean, operator-requested
+// stop and carries no reason.
+func disconnectEvent(err error) Event {
+	event := Event{Type: EventDisconnected}
+	if err != nil {
+		event.Direction = "error"
+		if payload, marshalErr := json.Marshal(map[string]string{"error": err.Error()}); marshalErr == nil {
+			event.Payload = string(payload)
+		}
+	}
+	return event
+}
+
 // pingSettings converts a ping period in seconds into the station.Config
 // pair. station.New rejects a PongTimeout at or below PingInterval (the
 // deadline would expire before the first ping could be answered), so the
