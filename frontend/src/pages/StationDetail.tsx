@@ -30,15 +30,19 @@ export function StationDetail({ stationId, onBack }: Props) {
   const [history, setHistory] = useState<StationEventRow[]>([])
   const [vendorName, setVendorName] = useState('Acme')
   const [model, setModel] = useState('SimStation')
+  const [heartbeatInterval, setHeartbeatInterval] = useState<number | null>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const { events, connected } = useStationSocket(stationId)
 
   const refresh = async () => {
-    setStation(await api.getStation(stationId))
+    const next = await api.getStation(stationId)
+    setStation(next)
+    setHeartbeatInterval((current) => current ?? next.heartbeatInterval)
   }
 
   useEffect(() => {
+    setHeartbeatInterval(null)
     refresh()
     api.events(stationId).then(setHistory).catch(() => {})
     const interval = setInterval(refresh, 5000)
@@ -81,6 +85,7 @@ export function StationDetail({ stationId, onBack }: Props) {
       </div>
       <p className="muted small">
         {station.csmsUrl} · OCPP {station.version} · 생성자 {station.createdBy}
+        {station.heartbeatInterval > 0 && ` · Heartbeat ${station.heartbeatInterval}초`}
         {station.insecureSkipTlsVerify && ' · TLS 검증 안 함'}
       </p>
 
@@ -107,6 +112,24 @@ export function StationDetail({ stationId, onBack }: Props) {
             >
               BootNotification 전송
             </button>
+          </div>
+          <div className="row">
+            <label>
+              Heartbeat 주기 (초)
+              <input
+                type="number"
+                min={0}
+                value={heartbeatInterval ?? station.heartbeatInterval}
+                onChange={(event) => setHeartbeatInterval(Math.max(0, Number(event.target.value) || 0))}
+              />
+            </label>
+            <button
+              disabled={!!busy}
+              onClick={() => run('Heartbeat 설정', () => api.setHeartbeatInterval(stationId, heartbeatInterval ?? station.heartbeatInterval))}
+            >
+              적용
+            </button>
+            <span className="muted small">0이면 자동 전송하지 않습니다.</span>
           </div>
           {error && <p className="error">{error}</p>}
 

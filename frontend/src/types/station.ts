@@ -6,6 +6,7 @@ export interface Station {
   csmsUrl: string
   version: OcppVersion
   connectorCount: number
+  heartbeatInterval: number
   basicAuthUser?: string
   insecureSkipTlsVerify: boolean
   createdBy: string
@@ -20,6 +21,7 @@ export interface CreateStationInput {
   csmsUrl: string
   version: OcppVersion
   connectorCount: number
+  heartbeatInterval: number
   basicAuthUser?: string
   basicAuthPass?: string
   insecureSkipTlsVerify: boolean

@@ -11,6 +11,7 @@ export function CreateStationModal({ onCreate, onClose }: Props) {
   const [csmsUrl, setCsmsUrl] = useState('ws://localhost:8080')
   const [version, setVersion] = useState<OcppVersion>('1.6')
   const [connectorCount, setConnectorCount] = useState(1)
+  const [heartbeatInterval, setHeartbeatInterval] = useState(60)
   const [basicAuthUser, setBasicAuthUser] = useState('')
   const [basicAuthUserTouched, setBasicAuthUserTouched] = useState(false)
   const [basicAuthPass, setBasicAuthPass] = useState('')
@@ -30,6 +31,7 @@ export function CreateStationModal({ onCreate, onClose }: Props) {
         csmsUrl: csmsUrl.trim(),
         version,
         connectorCount,
+        heartbeatInterval,
         basicAuthUser: basicAuthUser.trim() || undefined,
         basicAuthPass: basicAuthPass || undefined,
         insecureSkipTlsVerify,
@@ -88,6 +90,15 @@ export function CreateStationModal({ onCreate, onClose }: Props) {
               max={16}
               value={connectorCount}
               onChange={(event) => setConnectorCount(Math.max(1, Number(event.target.value) || 1))}
+            />
+          </label>
+          <label>
+            Heartbeat 주기 (초, 0이면 비활성화)
+            <input
+              type="number"
+              min={0}
+              value={heartbeatInterval}
+              onChange={(event) => setHeartbeatInterval(Math.max(0, Number(event.target.value) || 0))}
             />
           </label>
           <fieldset>

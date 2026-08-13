@@ -1,6 +1,7 @@
 package simulator
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,54 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/seanlee0923/ocpp/station"
 )
+
+func TestAutomaticHeartbeat(t *testing.T) {
+	heartbeats := make(chan struct{}, 1)
+	upgrader := websocket.Upgrader{Subprotocols: []string{"ocpp1.6"}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close() //nolint:errcheck // test CSMS
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var call []json.RawMessage
+			if json.Unmarshal(data, &call) != nil || len(call) != 4 {
+				continue
+			}
+			var id, action string
+			if json.Unmarshal(call[1], &id) != nil || json.Unmarshal(call[2], &action) != nil || action != "Heartbeat" {
+				continue
+			}
+			heartbeats <- struct{}{}
+			response, _ := json.Marshal([]any{3, id, map[string]string{"currentTime": time.Now().UTC().Format(time.RFC3339)}})
+			if conn.WriteMessage(websocket.TextMessage, response) != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	registry := NewRegistry(nil)
+	cfg := StationConfig{
+		Identity: "CP-HB", CSMSURL: "ws" + strings.TrimPrefix(server.URL, "http"),
+		Version: "1.6", HeartbeatInterval: 1,
+	}
+	if _, err := registry.Create("heartbeat", cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer registry.Delete("heartbeat") //nolint:errcheck // test cleanup
+
+	select {
+	case <-heartbeats:
+	case <-time.After(3 * time.Second):
+		t.Fatal("CSMS did not receive an automatic Heartbeat")
+	}
+}
 
 // TestReconnectAfterDisconnect guards the fix for a reconnect that silently
 // never dialed: station.Stop() is permanent, so reusing the same

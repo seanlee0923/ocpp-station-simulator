@@ -26,6 +26,7 @@ type Station struct {
 	// see toStationResponse.
 	BasicAuthPass         string `gorm:"type:varchar(255)"`
 	ConnectorCount        int    `gorm:"default:1"`     // physical charge points commonly expose 2+ connectors sharing one identity/session
+	HeartbeatInterval     int    `gorm:"default:0"`     // seconds; 0 disables automatic OCPP Heartbeat calls
 	InsecureSkipTLSVerify bool   `gorm:"default:false"` // wss:// only; test CSMS with a self-signed/internal CA cert
 	CreatedBy             string `gorm:"type:varchar(255)"`
 	LastKnownStatus       string `gorm:"type:varchar(32)"`

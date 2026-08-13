@@ -275,6 +275,11 @@ func (sim *v201Simulator) SendAuthorize(ctx context.Context, idTag string) (Auth
 	return AuthorizeResult{Status: string(confirmation.IDTokenInfo.Status)}, nil
 }
 
+func (sim *v201Simulator) SendHeartbeat(ctx context.Context) error {
+	_, err := callAndEmit[v201.HeartbeatRequest, v201.HeartbeatConfirmation](ctx, &sim.eventBus, sim.st(), "Heartbeat", v201.HeartbeatRequest{})
+	return err
+}
+
 // StartTransaction generates the transaction ID itself: unlike OCPP 1.6,
 // 2.0.1's TransactionEventConfirmation carries no transactionId — the
 // charging station is the one that allocates it, in the request.

@@ -265,6 +265,11 @@ func (sim *v16Simulator) SendAuthorize(ctx context.Context, idTag string) (Autho
 	return AuthorizeResult{Status: string(confirmation.IDTagInfo.Status)}, nil
 }
 
+func (sim *v16Simulator) SendHeartbeat(ctx context.Context) error {
+	_, err := callAndEmit[v16.HeartbeatRequest, v16.HeartbeatConfirmation](ctx, &sim.eventBus, sim.st(), "Heartbeat", v16.HeartbeatRequest{})
+	return err
+}
+
 func (sim *v16Simulator) StartTransaction(ctx context.Context, req StartTxRequest) (StartTxResult, error) {
 	request := v16.StartTransactionRequest{
 		ConnectorID: req.ConnectorID,

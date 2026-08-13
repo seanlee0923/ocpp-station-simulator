@@ -26,6 +26,9 @@ type StationConfig struct {
 	// certificate during local testing; never enable it against a
 	// production CSMS.
 	InsecureSkipTLSVerify bool
+	// HeartbeatInterval is the automatic OCPP Heartbeat period in seconds.
+	// Zero disables the loop.
+	HeartbeatInterval int
 }
 
 // EventType is the kind of thing that just happened to a Simulator. It
@@ -104,6 +107,7 @@ type Simulator interface {
 
 	SendBootNotification(ctx context.Context, fields BootFields) (BootResult, error)
 	SendAuthorize(ctx context.Context, idTag string) (AuthorizeResult, error)
+	SendHeartbeat(ctx context.Context) error
 	StartTransaction(ctx context.Context, req StartTxRequest) (StartTxResult, error)
 	SendMeterValues(ctx context.Context, req MeterValuesRequest) error
 	StopTransaction(ctx context.Context, req StopTxRequest) error

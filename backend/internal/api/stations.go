@@ -18,6 +18,10 @@ func (app *App) createStation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if body.HeartbeatInterval < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "heartbeatInterval must not be negative"})
+		return
+	}
 	actor := actorFrom(c)
 	id := uuid.NewString()
 
@@ -25,6 +29,7 @@ func (app *App) createStation(c *gin.Context) {
 		Identity: body.Identity, CSMSURL: body.CSMSURL, Version: body.Version,
 		BasicAuthUser: body.BasicAuthUser, BasicAuthPass: body.BasicAuthPass,
 		InsecureSkipTLSVerify: body.InsecureSkipTLSVerify,
+		HeartbeatInterval:     body.HeartbeatInterval,
 	}
 	if _, err := app.Registry.Create(id, cfg); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -37,7 +42,8 @@ func (app *App) createStation(c *gin.Context) {
 	}
 	row := db.Station{
 		ID: id, Identity: body.Identity, CSMSURL: body.CSMSURL, Version: body.Version,
-		ConnectorCount: connectorCount, BasicAuthUser: body.BasicAuthUser, BasicAuthPass: body.BasicAuthPass,
+		ConnectorCount: connectorCount, HeartbeatInterval: body.HeartbeatInterval,
+		BasicAuthUser: body.BasicAuthUser, BasicAuthPass: body.BasicAuthPass,
 		InsecureSkipTLSVerify: body.InsecureSkipTLSVerify, CreatedBy: actor,
 		LastKnownStatus: "connecting",
 	}
@@ -138,6 +144,7 @@ func (app *App) connectStation(c *gin.Context) {
 			Identity: row.Identity, CSMSURL: row.CSMSURL, Version: row.Version,
 			BasicAuthUser: row.BasicAuthUser, BasicAuthPass: row.BasicAuthPass,
 			InsecureSkipTLSVerify: row.InsecureSkipTLSVerify,
+			HeartbeatInterval:     row.HeartbeatInterval,
 		}
 		// Registry.Create already starts connecting — no separate Reconnect call needed.
 		managed, err = app.Registry.Create(id, cfg)
@@ -267,6 +274,31 @@ func (app *App) sendDiagnosticsStatusNotification(c *gin.Context) {
 		return
 	}
 	if err := managed.Sim.SendDiagnosticsStatusNotification(c.Request.Context(), body.Status); app.fail(c, err) {
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (app *App) setHeartbeatInterval(c *gin.Context) {
+	var body heartbeatSettingsRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if body.Interval < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "interval must not be negative"})
+		return
+	}
+	managed, ok := app.mustGetManaged(c)
+	if !ok {
+		return
+	}
+	if err := app.DB.Model(&db.Station{}).Where("id = ?", managed.ID).Update("heartbeat_interval", body.Interval).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := app.Registry.SetHeartbeatInterval(managed.ID, body.Interval); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.Status(http.StatusNoContent)
