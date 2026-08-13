@@ -44,6 +44,8 @@ export const api = {
   diagnosticsStatusNotification: (id: string, status: string) => post<void>(`/${id}/diagnostics-status-notification`, { status }),
   setHeartbeatInterval: (id: string, interval: number) =>
     request<void>(`/${id}/heartbeat`, { method: 'PUT', body: JSON.stringify({ interval }) }),
+  setPingInterval: (id: string, interval: number) =>
+    request<void>(`/${id}/ping`, { method: 'PUT', body: JSON.stringify({ interval }) }),
   events: (id: string) => request<StationEventRow[]>(`/${id}/events`),
   sendDataTransfer: (id: string, body: SendDataTransferInput) => post<DataTransferResult>(`/${id}/data-transfer`, body),
   listDataTransferHandlers: (id: string) => request<DataTransferHandlerRow[]>(`/${id}/data-transfer-handlers`),

@@ -116,3 +116,7 @@ type statusOnlyRequest struct {
 type heartbeatSettingsRequest struct {
 	Interval int `json:"interval"`
 }
+
+type pingSettingsRequest struct {
+	Interval int `json:"interval"`
+}

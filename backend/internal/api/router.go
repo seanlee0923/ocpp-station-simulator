@@ -39,6 +39,7 @@ func RegisterRoutes(router *gin.Engine, app *App) {
 	scoped.POST("/firmware-status-notification", app.sendFirmwareStatusNotification)
 	scoped.POST("/diagnostics-status-notification", app.sendDiagnosticsStatusNotification)
 	scoped.PUT("/heartbeat", app.setHeartbeatInterval)
+	scoped.PUT("/ping", app.setPingInterval)
 	scoped.POST("/data-transfer", app.sendDataTransfer)
 	scoped.GET("/data-transfer-handlers", app.listDataTransferHandlers)
 	scoped.POST("/data-transfer-handlers", app.createDataTransferHandler)

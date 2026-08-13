@@ -48,7 +48,7 @@ func (app *App) createStation(c *gin.Context) {
 	row := db.Station{
 		ID: id, Identity: body.Identity, CSMSURL: body.CSMSURL, Version: body.Version,
 		ConnectorCount: connectorCount, HeartbeatInterval: body.HeartbeatInterval,
-		PingInterval:   body.PingInterval,
+		PingInterval:  body.PingInterval,
 		BasicAuthUser: body.BasicAuthUser, BasicAuthPass: body.BasicAuthPass,
 		InsecureSkipTLSVerify: body.InsecureSkipTLSVerify, CreatedBy: actor,
 		LastKnownStatus: "connecting",
@@ -319,6 +319,35 @@ func (app *App) setHeartbeatInterval(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// setPingInterval stores the period and stages it on the running station.
+// Unlike the heartbeat it cannot apply to the connection already open — the
+// ping loop lives inside station.Station, built once at connect time — so
+// the operator has to reconnect for a change to take effect.
+func (app *App) setPingInterval(c *gin.Context) {
+	var body pingSettingsRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if body.Interval < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "interval must not be negative"})
+		return
+	}
+	managed, ok := app.mustGetManaged(c)
+	if !ok {
+		return
+	}
+	if err := app.DB.Model(&db.Station{}).Where("id = ?", managed.ID).Update("ping_interval", body.Interval).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := app.Registry.SetPingInterval(managed.ID, body.Interval); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"appliesOnReconnect": true})
 }
 
 const defaultEventLimit = 200
