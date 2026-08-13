@@ -27,6 +27,13 @@ type Station struct {
 	BasicAuthPass         string `gorm:"type:varchar(255)"`
 	ConnectorCount        int    `gorm:"default:1"`     // physical charge points commonly expose 2+ connectors sharing one identity/session
 	HeartbeatInterval     int    `gorm:"default:0"`     // seconds; 0 disables automatic OCPP Heartbeat calls
+	// PingInterval is the WebSocket-level ping period in seconds (0 = off),
+	// a different layer from HeartbeatInterval. A CSMS may dictate it via
+	// the OCPP 1.6-J WebSocketPingInterval configuration key, in which case
+	// the value is persisted here and applied on the next connect rather
+	// than to the live connection: rebuilding the station mid-session would
+	// reconnect, prompting the CSMS to send the key again, looping forever.
+	PingInterval          int    `gorm:"default:0"`
 	InsecureSkipTLSVerify bool   `gorm:"default:false"` // wss:// only; test CSMS with a self-signed/internal CA cert
 	CreatedBy             string `gorm:"type:varchar(255)"`
 	LastKnownStatus       string `gorm:"type:varchar(32)"`

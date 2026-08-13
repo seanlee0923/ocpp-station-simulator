@@ -121,6 +121,26 @@ func (r *Registry) SetHeartbeatInterval(id string, interval int) error {
 	return nil
 }
 
+// SetPingInterval stages a WebSocket ping period for the station's next
+// Connect. Unlike SetHeartbeatInterval it cannot take effect immediately —
+// the ping loop lives inside station.Station, whose config is fixed at
+// build time — which is exactly what keeps a CSMS-driven change from
+// fighting the connection it arrived on; see Simulator.SetPingInterval.
+func (r *Registry) SetPingInterval(id string, interval int) error {
+	if interval < 0 {
+		return errors.New("ping interval must not be negative")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	managed, ok := r.stations[id]
+	if !ok {
+		return ErrNotFound
+	}
+	managed.Config.PingInterval = interval
+	managed.Sim.SetPingInterval(interval)
+	return nil
+}
+
 // forward relays sim's events until done is closed (station removed). It
 // deliberately never closes sim.Events() itself — the channel is simply
 // abandoned and garbage-collected once nothing references sim anymore.

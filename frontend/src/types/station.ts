@@ -7,6 +7,7 @@ export interface Station {
   version: OcppVersion
   connectorCount: number
   heartbeatInterval: number
+  pingInterval: number
   basicAuthUser?: string
   insecureSkipTlsVerify: boolean
   createdBy: string
@@ -22,6 +23,7 @@ export interface CreateStationInput {
   version: OcppVersion
   connectorCount: number
   heartbeatInterval: number
+  pingInterval: number
   basicAuthUser?: string
   basicAuthPass?: string
   insecureSkipTlsVerify: boolean

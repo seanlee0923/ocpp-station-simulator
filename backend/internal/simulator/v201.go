@@ -53,12 +53,15 @@ func (sim *v201Simulator) buildStation() (*station.Station, error) {
 	cfg := sim.cfg
 	sim.mu.Unlock()
 
+	pingInterval, pongTimeout := pingSettings(cfg.PingInterval)
 	st, err := station.New(station.Config{
 		URL:             cfg.CSMSURL,
 		Identity:        cfg.Identity,
 		Version:         protocol.OCPP201,
 		BasicAuth:       basicAuth(cfg),
 		TLSConfig:       tlsConfig(cfg),
+		PingInterval:    pingInterval,
+		PongTimeout:     pongTimeout,
 		ReconnectPolicy: &station.ReconnectPolicy{InitialDelay: time.Second, MaxDelay: 30 * time.Second, Multiplier: 2},
 		OnConnect:       func(*station.Station) { sim.emit(Event{Type: EventConnected}) },
 		OnDisconnect:    func(*station.Station, error) { sim.emit(Event{Type: EventDisconnected}) },
@@ -403,4 +406,13 @@ func stopReason201(reason string) *v201.TransactionEventRequestReasonEnum {
 	}
 	value := v201.TransactionEventRequestReasonEnum(reason)
 	return &value
+}
+
+// SetPingInterval records the new period on sim.cfg so the next
+// buildStation picks it up; see the Simulator interface for why the live
+// connection is left alone.
+func (sim *v201Simulator) SetPingInterval(seconds int) {
+	sim.mu.Lock()
+	sim.cfg.PingInterval = seconds
+	sim.mu.Unlock()
 }

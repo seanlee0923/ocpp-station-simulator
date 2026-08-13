@@ -14,6 +14,7 @@ type createStationRequest struct {
 	Version               string `json:"version" binding:"required"` // "1.6" | "2.0.1" | "2.1"
 	ConnectorCount        int    `json:"connectorCount"`
 	HeartbeatInterval     int    `json:"heartbeatInterval"`
+	PingInterval          int    `json:"pingInterval"`
 	BasicAuthUser         string `json:"basicAuthUser"`
 	BasicAuthPass         string `json:"basicAuthPass"`
 	InsecureSkipTLSVerify bool   `json:"insecureSkipTlsVerify"`
@@ -26,6 +27,7 @@ type stationResponse struct {
 	Version               string     `json:"version"`
 	ConnectorCount        int        `json:"connectorCount"`
 	HeartbeatInterval     int        `json:"heartbeatInterval"`
+	PingInterval          int        `json:"pingInterval"`
 	BasicAuthUser         string     `json:"basicAuthUser,omitempty"`
 	InsecureSkipTLSVerify bool       `json:"insecureSkipTlsVerify"`
 	CreatedBy             string     `json:"createdBy"`
@@ -38,7 +40,8 @@ type stationResponse struct {
 func toStationResponse(row db.Station, state string) stationResponse {
 	response := stationResponse{
 		ID: row.ID, Identity: row.Identity, CSMSURL: row.CSMSURL, Version: row.Version,
-		ConnectorCount: row.ConnectorCount, HeartbeatInterval: row.HeartbeatInterval, BasicAuthUser: row.BasicAuthUser,
+		ConnectorCount: row.ConnectorCount, HeartbeatInterval: row.HeartbeatInterval,
+		PingInterval: row.PingInterval, BasicAuthUser: row.BasicAuthUser,
 		InsecureSkipTLSVerify: row.InsecureSkipTLSVerify, CreatedBy: row.CreatedBy,
 		CreatedAt: row.CreatedAt, LastKnownStatus: row.LastKnownStatus, State: state,
 	}

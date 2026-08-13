@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"log"
+	"strconv"
 
 	"gorm.io/gorm"
 
@@ -60,6 +61,9 @@ func (app *App) onSimulatorEvent(stationID string, event simulator.Event) {
 	if event.Type == simulator.EventConnected || event.Type == simulator.EventDisconnected {
 		app.DB.Model(&db.Station{}).Where("id = ?", stationID).Update("last_known_status", string(event.Type))
 	}
+	if event.Type == simulator.EventRemoteCommandCalled && event.Action == "ChangeConfiguration" {
+		app.persistPingInterval(stationID, event.Payload)
+	}
 
 	payload, err := json.Marshal(wsEvent{
 		StationID: stationID, Type: string(event.Type), Action: event.Action,
@@ -67,5 +71,30 @@ func (app *App) onSimulatorEvent(stationID string, event simulator.Event) {
 	})
 	if err == nil {
 		app.Hub.Broadcast(stationID, payload)
+	}
+}
+
+// persistPingInterval records a WebSocketPingInterval the CSMS set via
+// ChangeConfiguration so the next connect honours it. It deliberately does
+// not touch the running station: station.Config is immutable once built, so
+// applying the value now would mean a rebuild-and-reconnect, and the CSMS
+// re-sends the key on every fresh connection — an endless reconnect loop.
+// Persisting instead makes the CSMS's wish take effect one session later.
+func (app *App) persistPingInterval(stationID, payload string) {
+	var body struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if json.Unmarshal([]byte(payload), &body) != nil || body.Key != "WebSocketPingInterval" {
+		return
+	}
+	// Negative values are invalid per OCPP 1.6-J; 0 legitimately means the
+	// CSMS is turning client-side pings off, so it is stored like any other.
+	seconds, err := strconv.Atoi(body.Value)
+	if err != nil || seconds < 0 {
+		return
+	}
+	if err := app.DB.Model(&db.Station{}).Where("id = ?", stationID).Update("ping_interval", seconds).Error; err != nil {
+		log.Printf("persist WebSocketPingInterval for station %s: %v", stationID, err)
 	}
 }

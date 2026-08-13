@@ -29,6 +29,28 @@ type StationConfig struct {
 	// HeartbeatInterval is the automatic OCPP Heartbeat period in seconds.
 	// Zero disables the loop.
 	HeartbeatInterval int
+	// PingInterval is the WebSocket-level ping period in seconds. Zero
+	// disables it. This is a different layer from HeartbeatInterval: a CSMS
+	// that closes connections it considers silent ("websocket ping
+	// timeout") counts ping frames, not OCPP Heartbeat messages, so a
+	// Heartbeat alone will not keep such a connection alive. OCPP 1.6-J
+	// exposes the CSMS's expectation as the WebSocketPingInterval
+	// configuration key — see persistPingInterval for how a CSMS-supplied
+	// value reaches this field.
+	PingInterval int
+}
+
+// pingSettings converts a ping period in seconds into the station.Config
+// pair. station.New rejects a PongTimeout at or below PingInterval (the
+// deadline would expire before the first ping could be answered), so the
+// timeout is derived rather than configured: 3x leaves room for two missed
+// pongs before the link is declared dead.
+func pingSettings(seconds int) (pingInterval, pongTimeout time.Duration) {
+	if seconds <= 0 {
+		return 0, 0
+	}
+	interval := time.Duration(seconds) * time.Second
+	return interval, 3 * interval
 }
 
 // EventType is the kind of thing that just happened to a Simulator. It
@@ -135,6 +157,14 @@ type Simulator interface {
 	// ChangeConfiguration (1.6) or SetVariables (2.0.1/2.1) — see
 	// configStore. Purely CSMS-driven; there is no operator-facing setter.
 	GetConfigValues() map[string]string
+
+	// SetPingInterval changes the WebSocket ping period used from the next
+	// Connect onwards. It deliberately does not disturb the live
+	// connection: station.Config is immutable once built, so applying it
+	// now would force a reconnect, and the CSMS that asked for the change
+	// re-sends WebSocketPingInterval on every fresh connection — the two
+	// would chase each other forever.
+	SetPingInterval(seconds int)
 
 	Events() <-chan Event
 }

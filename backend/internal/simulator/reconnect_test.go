@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seanlee0923/ocpp/protocol"
 	"github.com/seanlee0923/ocpp/station"
 )
 
@@ -122,4 +123,77 @@ func awaitState(t *testing.T, sim Simulator, want station.ConnectionState, stage
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("%s: state = %v, want %v", stage, sim.State(), want)
+}
+
+// TestWebSocketPingIsSent covers the reason PingInterval exists: a CSMS that
+// closes connections it considers silent counts WebSocket ping frames, not
+// OCPP Heartbeat messages, so the Station has to originate real pings.
+func TestWebSocketPingIsSent(t *testing.T) {
+	pings := make(chan struct{}, 1)
+	upgrader := websocket.Upgrader{Subprotocols: []string{"ocpp1.6"}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close() //nolint:errcheck // test CSMS
+		conn.SetPingHandler(func(data string) error {
+			select {
+			case pings <- struct{}{}:
+			default:
+			}
+			return conn.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(time.Second))
+		})
+		// Control frames are only processed while a read is in flight.
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	sim, err := New(StationConfig{
+		Identity: "PING-1", CSMSURL: strings.Replace(server.URL, "http://", "ws://", 1),
+		Version: "1.6", PingInterval: 1,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := sim.Connect(t.Context()); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer sim.Disconnect()
+
+	select {
+	case <-pings:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no WebSocket ping arrived within 10s")
+	}
+}
+
+// TestPingSettingsSatisfiesStationInvariant guards the derived PongTimeout:
+// station.New rejects a PongTimeout at or below PingInterval, so a bad ratio
+// here would surface as every station failing to build.
+func TestPingSettingsSatisfiesStationInvariant(t *testing.T) {
+	if interval, timeout := pingSettings(0); interval != 0 || timeout != 0 {
+		t.Fatalf("pingSettings(0) = %v, %v, want 0, 0 (disabled)", interval, timeout)
+	}
+	for _, seconds := range []int{1, 30, 45, 3600} {
+		interval, timeout := pingSettings(seconds)
+		if interval != time.Duration(seconds)*time.Second {
+			t.Errorf("pingSettings(%d) interval = %v", seconds, interval)
+		}
+		if timeout <= interval {
+			t.Errorf("pingSettings(%d) timeout %v must exceed interval %v", seconds, timeout, interval)
+		}
+		// station.New is where the invariant is enforced; building (not
+		// connecting) is enough to exercise it.
+		if _, err := station.New(station.Config{
+			URL: "ws://example.invalid", Identity: "X", Version: protocol.OCPP16,
+			PingInterval: interval, PongTimeout: timeout,
+		}); err != nil {
+			t.Errorf("station.New rejected pingSettings(%d): %v", seconds, err)
+		}
+	}
 }

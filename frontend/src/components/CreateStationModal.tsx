@@ -12,6 +12,7 @@ export function CreateStationModal({ onCreate, onClose }: Props) {
   const [version, setVersion] = useState<OcppVersion>('1.6')
   const [connectorCount, setConnectorCount] = useState(1)
   const [heartbeatInterval, setHeartbeatInterval] = useState(60)
+  const [pingInterval, setPingInterval] = useState(0)
   const [basicAuthUser, setBasicAuthUser] = useState('')
   const [basicAuthUserTouched, setBasicAuthUserTouched] = useState(false)
   const [basicAuthPass, setBasicAuthPass] = useState('')
@@ -32,6 +33,7 @@ export function CreateStationModal({ onCreate, onClose }: Props) {
         version,
         connectorCount,
         heartbeatInterval,
+        pingInterval,
         basicAuthUser: basicAuthUser.trim() || undefined,
         basicAuthPass: basicAuthPass || undefined,
         insecureSkipTlsVerify,
@@ -100,6 +102,19 @@ export function CreateStationModal({ onCreate, onClose }: Props) {
               value={heartbeatInterval}
               onChange={(event) => setHeartbeatInterval(Math.max(0, Number(event.target.value) || 0))}
             />
+          </label>
+          <label>
+            WebSocket Ping 주기 (초, 0이면 비활성화)
+            <input
+              type="number"
+              min={0}
+              value={pingInterval}
+              onChange={(event) => setPingInterval(Math.max(0, Number(event.target.value) || 0))}
+            />
+            <span className="muted small">
+              OCPP Heartbeat와는 다른 계층입니다. 유휴 연결을 끊는 CSMS는 ping 프레임을 봅니다.
+              CSMS가 WebSocketPingInterval을 지정하면 그 값이 저장되어 다음 연결부터 적용됩니다.
+            </span>
           </label>
           <fieldset>
             <legend>Basic Auth (선택)</legend>

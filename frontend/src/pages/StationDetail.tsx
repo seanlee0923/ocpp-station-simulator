@@ -86,6 +86,7 @@ export function StationDetail({ stationId, onBack }: Props) {
       <p className="muted small">
         {station.csmsUrl} · OCPP {station.version} · 생성자 {station.createdBy}
         {station.heartbeatInterval > 0 && ` · Heartbeat ${station.heartbeatInterval}초`}
+        {station.pingInterval > 0 && ` · WS Ping ${station.pingInterval}초`}
         {station.insecureSkipTlsVerify && ' · TLS 검증 안 함'}
       </p>
 

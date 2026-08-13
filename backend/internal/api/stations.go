@@ -22,6 +22,10 @@ func (app *App) createStation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "heartbeatInterval must not be negative"})
 		return
 	}
+	if body.PingInterval < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pingInterval must not be negative"})
+		return
+	}
 	actor := actorFrom(c)
 	id := uuid.NewString()
 
@@ -30,6 +34,7 @@ func (app *App) createStation(c *gin.Context) {
 		BasicAuthUser: body.BasicAuthUser, BasicAuthPass: body.BasicAuthPass,
 		InsecureSkipTLSVerify: body.InsecureSkipTLSVerify,
 		HeartbeatInterval:     body.HeartbeatInterval,
+		PingInterval:          body.PingInterval,
 	}
 	if _, err := app.Registry.Create(id, cfg); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -43,6 +48,7 @@ func (app *App) createStation(c *gin.Context) {
 	row := db.Station{
 		ID: id, Identity: body.Identity, CSMSURL: body.CSMSURL, Version: body.Version,
 		ConnectorCount: connectorCount, HeartbeatInterval: body.HeartbeatInterval,
+		PingInterval:   body.PingInterval,
 		BasicAuthUser: body.BasicAuthUser, BasicAuthPass: body.BasicAuthPass,
 		InsecureSkipTLSVerify: body.InsecureSkipTLSVerify, CreatedBy: actor,
 		LastKnownStatus: "connecting",
@@ -145,6 +151,7 @@ func (app *App) connectStation(c *gin.Context) {
 			BasicAuthUser: row.BasicAuthUser, BasicAuthPass: row.BasicAuthPass,
 			InsecureSkipTLSVerify: row.InsecureSkipTLSVerify,
 			HeartbeatInterval:     row.HeartbeatInterval,
+			PingInterval:          row.PingInterval,
 		}
 		// Registry.Create already starts connecting — no separate Reconnect call needed.
 		managed, err = app.Registry.Create(id, cfg)
@@ -155,9 +162,19 @@ func (app *App) connectStation(c *gin.Context) {
 	} else if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	} else if err := app.Registry.Reconnect(managed.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	} else {
+		// A WebSocketPingInterval the CSMS set during the previous session
+		// was persisted rather than applied live (see persistPingInterval);
+		// reconnecting is that "next session", so pick it up here. A
+		// missing row just leaves the staged value alone.
+		var row db.Station
+		if dbErr := app.DB.First(&row, "id = ?", id).Error; dbErr == nil {
+			_ = app.Registry.SetPingInterval(managed.ID, row.PingInterval)
+		}
+		if err := app.Registry.Reconnect(managed.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	app.Actors.set(managed.ID, actor)
